@@ -147,12 +147,12 @@ class DataPreprocessor:
         medium_set = set()
 
         for player_data in data:
-            player_id, games, total_playtime_across_games, genre_playtime_dict, games_played,age,friend_type, country, user_interests = self.process_player(player_data)
+            player_id, games, total_playtime_across_games, genre_playtime_dict, games_played,age,recommendation_expertise, country, user_interests = self.process_player(player_data)
 
             for game in games:
                 game_data, updated_genres, updated_platforms, updated_mediums = self.process_game(player_id, game)
                 game_data['age'] = age
-                game_data['friend_type'] = friend_type
+                game_data['recommendation_expertise'] = recommendation_expertise
                 game_data['country'] = country
                 game_data['user_interests'] = user_interests
                 df_list.append(game_data)
@@ -204,7 +204,7 @@ class DataPreprocessor:
         player_summary = endpoint_data.get('playerSummary', {})
         dob = player_summary.get('dob', None)
         age = self.calculate_age(dob) if dob else None
-        friend_type = player_summary.get('friend_type', 'beginner')
+        recommendation_expertise = player_summary.get('recommendation_expertise', 'beginner')
         country = player_summary.get('country', '')
         user_interests = player_summary.get('user_interests', [])
 
@@ -229,7 +229,7 @@ class DataPreprocessor:
             # Track game diversity (number of distinct games played)
             games_played.add(game['appid'])
         
-        return player_id, games, total_playtime_across_games, genre_playtime_dict, games_played, age, friend_type, country, user_interests
+        return player_id, games, total_playtime_across_games, genre_playtime_dict, games_played, age, recommendation_expertise, country, user_interests
 
 
     def process_game(self, player_id, game):
@@ -716,7 +716,7 @@ class ModelTrainer:
 #   - `num_recommendations` (optional): The number of users to recommend (default: 3).
 #   - `filters (optional)`: A dictionary to filter users based on attributes such as:
 #     - country
-#     - friend_type
+#     - recommendation_expertise
 #     - user_interests
 #     - age_range
 #   
@@ -796,7 +796,7 @@ class RecommendationSystem:
             # If no specializations exist, return an empty list
             return []
 
-    def process_filters(self, df, game_id, country, friend_type, user_interests,age, delta=None):
+    def process_filters(self, df, game_id, country, recommendation_expertise, user_interests,age, delta=None):
         """Filter the dataframe based on game_id and other filters."""
         # Filter by game_id
         filtered_df = df[df['game_id'] == game_id]
@@ -809,9 +809,9 @@ class RecommendationSystem:
             if filtered_df.empty:
                 return filtered_df
 
-        # Filter by friend_type
-        if friend_type:
-            filtered_df = filtered_df[filtered_df['friend_type'] == friend_type]
+        # Filter by recommendation_expertise
+        if recommendation_expertise:
+            filtered_df = filtered_df[filtered_df['recommendation_expertise'] == recommendation_expertise]
             if filtered_df.empty:
                 return filtered_df
 
@@ -833,7 +833,7 @@ class RecommendationSystem:
 
         return filtered_df
 
-    def recommend_top_users(self, df, game_id, user_id,offset,num_recommendations=20, filters=None, jwt_token=None):
+    def recommend_top_users(self, df, game_id, user_id,offset,num_recommendations=20, filters=None):
         try:
             print(game_id,user_id,offset,num_recommendations,filters)
             user_dob = df[df['player_id'] == user_id]['age'].values[0] 
@@ -843,7 +843,7 @@ class RecommendationSystem:
                     df,
                     game_id,
                     filters.get('country'),
-                    filters.get('friend_type'),
+                    filters.get('recommendation_expertise'),
                     filters.get('user_interests'),
                     user_dob,
                     filters.get('age_delta',12)
@@ -931,10 +931,11 @@ class RecommendationSystem:
                     #"score": round(user_scores[uid], 2),
                     "country": user_info['country'],
                     "age": int(user_info['age']),
-                    "friend_type": user_info['friend_type'],
+                    "recommendation_expertise": user_info['recommendation_expertise'],
                     "interests": user_info['user_interests'],
                     #"specialization": user_info['specialization'],  # Include specialization in the response
-                    "specialization": []
+                    "user_specialization": [],
+                    "recommendation_specialization": []
                 })
 
             # Prepare the response object
@@ -1008,7 +1009,7 @@ def plot_loss(history):
 #    - **RecommendationSystem**: Instantiates a recommendation system using the trained Siamese model, VAE, dataset preparer, and mapping layer.
 #    - `recommend_top_users()`: Retrieves the top user recommendations for a specific game and user ID.
 #    - `num_recommendations`: The number of user recommendations to be generated (default: 12).
-#    - `filters applied`: The user can specify a game ID, select users within a certain age range,and filter by friend_type, country, and interests like "RPG" or "Indie".
+#    - `filters applied`: The user can specify a game ID, select users within a certain age range,and filter by recommendation_expertise, country, and interests like "RPG" or "Indie".
 # 
 
 # In[16]:
@@ -1016,7 +1017,7 @@ def plot_loss(history):
 
 if __name__ == "__main__":
     # Load your data and initialize the model, dataset preparer, and mapping layer here
-    data_loader = DataLoader('request.json')
+    data_loader = DataLoader('Datasets/latest.json')
     raw_data = data_loader.load_data()
 
     preprocessor = DataPreprocessor()
@@ -1046,18 +1047,18 @@ if __name__ == "__main__":
     recommendation_system = RecommendationSystem(
         model=siamese_model, vae_model=vae_model, dataset_preparer=dataset_preparer, mapping_layer=mapping_layer)
 
-    game_id = 840
-    user_id = "35"
+    game_id = 48000
+    user_id = "dCUKB2Vf9Zk"
     offset = 10
-    jwt_token = 'your-jwt-token'  # Provide a valid JWT token
     filters = {
-        "friend_type": "Pro",
+        "recommendation_expertise": "Pro",
+        "recommendation_specialisation": "Strategy",
         "country": "Brazil",
         "user_interests": ["Action", "MOBA", "Strategy", "Indie", "RPG"],
     }
 
     result = recommendation_system.recommend_top_users(
-        df=preprocessed_data, game_id=game_id, user_id=user_id,offset=offset,num_recommendations=num_recommendations, filters=filters, jwt_token=jwt_token)
+        df=preprocessed_data, game_id=game_id, user_id=user_id,offset=offset,num_recommendations=num_recommendations, filters=filters)
     
     print(json.dumps(result, indent=2))
 
