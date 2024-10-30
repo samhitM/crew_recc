@@ -39,7 +39,7 @@ def get_db_connection():
 security = HTTPBearer()
 
 def verify_token(token) -> str:
-    secret_key = "942bb82561c615e0d67a27538c8e203ea60423c0508956a134e4f747d88189bd"
+    secret_key = "1c75f472b1e52c582c8ed3f4d88af9c0137f9a2eeeb1d63e97ecedd1be8f1a3c"
     try:
         payload = pyjwt.decode(token, secret_key, algorithms=["HS256"])
         crew_user_id = payload.get("userId")
@@ -152,11 +152,12 @@ async def get_recommendations(
             filters=request.filters
         )
 
-        # Add username to each recommended user
-        for user in top_users['recommended_users']:
-            user['username'] = get_username(user['user_id'])
+    # Include usernames for each recommended user
+        for user in top_users["recommended_users"]:
+            user["username"] = get_username(user["user_id"])
 
         return {"recommended_users": top_users}
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting recommendations: {str(e)}")
 
