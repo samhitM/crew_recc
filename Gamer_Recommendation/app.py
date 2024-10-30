@@ -152,11 +152,21 @@ async def get_recommendations(
             filters=request.filters
         )
 
-    # Include usernames for each recommended user
+        # Fetch username for the requesting user_id
+        requesting_username = get_username(request.user_id)
+        
+        # Include usernames for each recommended user
         for user in top_users["recommended_users"]:
             user["username"] = get_username(user["user_id"])
 
-        return {"recommended_users": top_users}
+        # Prepare and return the response, including requesting user's username
+        return {
+            "game_id": request.game_id,
+            "user_id": request.user_id,
+            "username": requesting_username,
+            "offset": request.offset,
+            "recommended_users": top_users["recommended_users"]
+        }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting recommendations: {str(e)}")

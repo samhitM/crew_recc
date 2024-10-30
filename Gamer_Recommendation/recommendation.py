@@ -833,7 +833,7 @@ class RecommendationSystem:
 
         return filtered_df
 
-    def recommend_top_users(self, df, game_id, user_id,offset,num_recommendations=20, filters=None):
+    def recommend_top_users(self, df, game_id, user_id,offset,num_recommendations=20, filters=None,jwt_token=None):
         try:
             print(game_id,user_id,offset,num_recommendations,filters)
             user_dob = df[df['player_id'] == user_id]['age'].values[0] 
@@ -1017,7 +1017,7 @@ def plot_loss(history):
 
 if __name__ == "__main__":
     # Load your data and initialize the model, dataset preparer, and mapping layer here
-    data_loader = DataLoader('Datasets/latest.json')
+    data_loader = DataLoader('Datasets/data.json')
     raw_data = data_loader.load_data()
 
     preprocessor = DataPreprocessor()
