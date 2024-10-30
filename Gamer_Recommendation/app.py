@@ -73,6 +73,19 @@ def get_endpoint_data():
     finally:
         conn.close()
 
+# Fetch username for a given user ID
+def get_username(user_id):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT full_name FROM \"user\" WHERE id = %s;", (user_id,))
+            result = cur.fetchone()
+            return result[0] if result else None
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching username: {str(e)}")
+    finally:
+        conn.close()
+
 # Initialize components for recommendation system
 model = tf.keras.models.load_model(
     'models/siamese_model.keras',
@@ -120,7 +133,7 @@ async def get_recommendations(
     secret_key: Optional[str] = Header(None)
 ):
     
-    keys=verify_token(secret_key)
+    keys = verify_token(secret_key)
     
     # Check if the secret key matches
     if keys != '7irNPR6kOia':
@@ -138,6 +151,11 @@ async def get_recommendations(
             num_recommendations=request.num_recommendations,
             filters=request.filters
         )
+
+        # Add username to each recommended user
+        for user in top_users['recommended_users']:
+            user['username'] = get_username(user['user_id'])
+
         return {"recommended_users": top_users}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting recommendations: {str(e)}")
