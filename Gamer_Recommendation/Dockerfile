@@ -10,7 +10,7 @@ COPY recommendation.py ./recommendation.py
 COPY models/ ./models/
 
 # Install dependencies
-RUN pip install fastapi uvicorn pydantic numpy tensorflow==2.17.0 pandas scikit-learn matplotlib jwt kafka-python psycopg2-binary httpx
+RUN pip install fastapi uvicorn pydantic numpy tensorflow==2.17.0 pandas scikit-learn matplotlib jwt kafka-python psycopg2-binary httpx google-cloud-secret-manager apscheduler
 
 # Expose the app port
 EXPOSE 8000
