@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recommendationsystem-deployment
+  labels:
+    app: recommendationsystem
+    environment: dev
+    team: ml
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: recommendationsystem
+  template:
+    metadata:
+      labels:
+        app: recommendationsystem
+        environment: dev
+        team: ml
+    spec:
+      containers:
+      - name: recommendationsystem
+        image: gcr.io/dazzling-spirit-426406-m4/recommendation-app:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "100m"
+          limits:
+            memory: "64Mi"
+            cpu: "200m"
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: recommendationsystem-service
+  labels:
+    app: recommendationsystem
+spec:
+  type: LoadBalancer
+  selector:
+    app: recommendationsystem
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
