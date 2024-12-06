@@ -1,20 +1,26 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: fastapi-deployment
+  name: recommendationsystem-deployment
+  labels:
+    app: recommendationsystem
+    environment: dev
+    team: ml
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
-      app: fastapi
+      app: recommendationsystem
   template:
     metadata:
       labels:
-        app: fastapi
+        app: recommendationsystem
+        environment: dev
+        team: ml
     spec:
       containers:
-      - name: fastapi
-        image: gcr.io/dazzling-spirit-426406-m4/fastapi-app:latest
+      - name: recommendationsystem
+        image: gcr.io/dazzling-spirit-426406-m4/recommendation-app:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
@@ -30,11 +36,13 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: fastapi-service
+  name: recommendationsystem-service
+  labels:
+    app: recommendationsystem
 spec:
   type: LoadBalancer
   selector:
-    app: fastapi
+    app: recommendationsystem
   ports:
     - protocol: TCP
       port: 80
