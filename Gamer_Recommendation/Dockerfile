@@ -28,8 +28,8 @@ COPY Gamer_Recommendation/services/ ./services/
 # Copy the utility files
 COPY Gamer_Recommendation/util/ ./util/
 
-# Install dependencies
-RUN pip install fastapi uvicorn pydantic numpy tensorflow==2.17.0 pandas scikit-learn matplotlib jwt kafka-python psycopg2-binary httpx google-cloud-secret-manager apscheduler
+# Copy the data_preprocessing files
+COPY Gamer_Recommendation/data_preprocessing/ ./data_preprocessing/
 
 # Expose the app port
 EXPOSE 8000
