@@ -21,5 +21,5 @@ def get_secret(secret_name):
     return response.payload.data.decode("UTF-8")
 
 # Secret keys for token verification, retrieved securely
-SECRET_KEY = get_secret("SECRET_KEY")
-VALID_SECRET_KEY = get_secret("VALID_SECRET_KEY")
+# SECRET_KEY = get_secret("SECRET_KEY")
+# VALID_SECRET_KEY = get_secret("VALID_SECRET_KEY")
