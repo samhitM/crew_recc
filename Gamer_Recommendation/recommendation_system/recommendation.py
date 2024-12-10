@@ -19,6 +19,7 @@ from data_preprocessing.mapping_layer import MappingLayer
 from data_preprocessing.dataset_preparer import DatasetPreparer
 from models.siamese_recommendation_model import SiameseRecommendationModel
 from util.model_trainer import ModelTrainer
+from core.database import get_interaction_type,get_specialisations
 
 
 # Set random seed for reproducibility
@@ -34,6 +35,7 @@ class RecommendationSystem:
 
     def fetch_user_relations(self, jwt_token=None, limit=50, offset=0, relation=None):
         """Fetch user relations with optional pagination and filtering."""
+        return []
         headers = {
             'Authorization': f'Bearer {jwt_token}'
         }
@@ -44,30 +46,42 @@ class RecommendationSystem:
             'offset': offset,
         }
         
+        # Request body for the relation filter
+        data = {}
         if relation:
-            params['relation'] = relation
+            data['relation'] = relation
         
-        # Send the GET request with headers and query parameters
-        response = requests.get('http://localhost/user/relations', headers=headers, params=params)
-        
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise ValueError(f"Failed to fetch relations. Status code: {response.status_code}")
+        try:
+            # Send the POST request with headers, query parameters, and request body
+            response = requests.post(
+                'https://localhost:3000/api/user/relations', ## Modify this when server gets hosted
+                headers=headers, 
+                params=params,
+                json=data,
+            )
+            
+            if response.status_code == 200:
+                # Parse the JSON response
+                relations = response.json()
+                return [
+                    {
+                        "user_id": r["user_id"],
+                        "relation": relation,
+                        "user_interests": r.get("user_interests", []),
+                        "played_games": r.get("played_games", []),
+                        "last_active_ts": r.get("last_active_ts", ""),
+                    }
+                    for r in relations
+                ]
+            elif response.status_code == 404:
+                # Handle no relations found
+                return []
+            else:
+                # Raise an error for unexpected status codes
+                raise ValueError(f"Failed to fetch relations. Status code: {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            raise ValueError(f"An error occurred while fetching relations: {str(e)}")
 
-    
-    def fetch_user_specializations(self, user_id, jwt_token=None):
-        return []
-        """Fetch user specializations based on user_id and JWT token."""
-        headers = {
-            'Authorization': f'Bearer {jwt_token}'
-        }
-        response = requests.get(f'http://localhost/api/specializations/{user_id}', headers=headers)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            # If no specializations exist, return an empty list
-            return []
 
     def process_filters(self, df, game_id, country, recommendation_expertise, user_interests,age, delta=None):
         """Filter the dataframe based on game_id and other filters."""
@@ -87,7 +101,7 @@ class RecommendationSystem:
             filtered_df = filtered_df[filtered_df['recommendation_expertise'] == recommendation_expertise]
             if filtered_df.empty:
                 return filtered_df
-
+        
         # Filter by user_interests
         if user_interests:
             filtered_df = filtered_df[
@@ -106,10 +120,11 @@ class RecommendationSystem:
 
         return filtered_df
 
-    def recommend_top_users(self, df, game_id, user_id,offset,num_recommendations=20, filters=None,jwt_token=None):
+    def recommend_top_users(self, df, game_id, user_id, offset, num_recommendations=20, filters=None, jwt_token=None):
         try:
-            print(game_id,user_id,offset,num_recommendations,filters)
-            user_dob = df[df['player_id'] == user_id]['age'].values[0] 
+            user_dob = df[df['player_id'] == user_id]['age'].values[0]
+            user_specializations = get_specialisations(user_id=user_id)  
+
             # Apply filters if provided
             if filters:
                 df = self.process_filters(
@@ -119,31 +134,28 @@ class RecommendationSystem:
                     filters.get('recommendation_expertise'),
                     filters.get('user_interests'),
                     user_dob,
-                    filters.get('age_delta',12)
+                    filters.get('age_delta', 12)
                 )
             if df.empty:
                 return {"game_id": game_id, "user_id": user_id, "recommended_users": []}
 
-            # Fetch relations for the user
-            #relations = self.fetch_user_relations(user_id, jwt_token=jwt_token)
-            relations={}
-            blocked_users = [r['user_id'] for r in relations if r.get('relation') == 'blocked_list']
-            reported_users = [r['user_id'] for r in relations if r.get('relation') == 'reported_list']
-            friends = [r['user_id'] for r in relations if r.get('relation') == 'friends']
-
-            # Fetch specializations for the user
-            specializations = self.fetch_user_specializations(user_id, jwt_token=jwt_token)
-
-            # Filter out blocked and reported users
-            df = df[~df['player_id'].isin(blocked_users + reported_users)]
+            # Fetch user relationships in a single batch
+            relationships = {
+                "friends": set(self.fetch_user_relations(jwt_token=jwt_token, limit=50, offset=0, relation="friends")),
+                "blocked": set(self.fetch_user_relations(jwt_token=jwt_token, limit=50, offset=0, relation="blocked_list")),
+                "reported": set(self.fetch_user_relations(jwt_token=jwt_token, limit=50, offset=0, relation="reported_list")),
+            }
             
+
+            # Exclude blocked and reported users early
+            df = df[~df['player_id'].isin(relationships["blocked"] | relationships["reported"])]
             if df.empty:
                 return {"game_id": game_id, "user_id": user_id, "recommended_users": []}
+            
 
             # Map game_id and user_id to indices
             game_idx = self.mapping_layer.map_game_id(game_id)
             user_idx = self.mapping_layer.map_user_id(user_id)
-
             if game_idx is None or user_idx is None:
                 raise ValueError("Invalid game_id or user_id mapping.")
 
@@ -151,83 +163,70 @@ class RecommendationSystem:
             user_input_indices = df['player_id'].map(self.mapping_layer.user_id_mapping).values.astype(np.int32)
             game_input = np.full(len(user_input_indices), game_idx, dtype=np.int32)
 
-            # Extract game and global features using dataset preparer
-            (_, _, game_features, global_features), _ = self.dataset_preparer.create_input_tensors(
-                df, self.mapping_layer
-            )
-
-            # Predict compatibility scores
+            # Extract features and predict scores
+            (_, _, game_features, global_features), _ = self.dataset_preparer.create_input_tensors(df, self.mapping_layer)
             inputs = (user_input_indices, game_input, game_features, global_features)
             scores = self.model.predict(inputs)
-            
 
             # Aggregate scores using original player IDs
-            user_scores = {}
-            for idx, score in enumerate(scores):
-                original_user_id = int(df.iloc[idx]['player_id'])  # Ensure native int type
-                user_scores[original_user_id] = user_scores.get(original_user_id, 0) + float(score)
-
-            # Normalize scores to make all values non-negative
-            min_score = min(user_scores.values())
+            df['score'] = scores
+            min_score = df['score'].min()
             if min_score < 0:
-                user_scores = {user: score - min_score for user, score in user_scores.items()}
+                df['score'] -= min_score  # Normalize scores to non-negative
 
-            # Adjust scores for friends (lower their priority)
-            for friend_id in friends:
-                if friend_id in user_scores:
-                    user_scores[friend_id] *= 0.8  # Reduce the score by 20% for friends
+            # Pre-fetch interactions and specializations for optimization
+            interaction_map = {row['player_id']: get_interaction_type(user_id, row['player_id']) for _, row in df.iterrows()}
+            specializations_map = {row['player_id']: get_specialisations(row['player_id']) for _, row in df.iterrows()}
+            
+            # Adjust scores for interactions
+            def adjust_score(row):
+                score = row['score']
+                interaction = interaction_map.get(row['player_id'])
+                if interaction:
+                    if interaction['eventType'] == "PROFILE_INTERACTION" and interaction['action'] == "friend_request":
+                        score *= 0.5
+                    elif interaction['eventType'] == "PROFILE_INTERACTION" and interaction['action'] == "ignored":
+                        time_elapsed = (datetime.now() - interaction['createTimestamp']).days
+                        decay_factor = max(0, 1 - time_elapsed / 30)
+                        score *= decay_factor
 
-            # Adjust scores for specializations (boost users with similar specializations)
-            for spec in specializations:
-                df_with_spec = df[df['specialization'].apply(lambda x: spec in x)]
-                for idx, row in df_with_spec.iterrows():
-                    player_id = int(row['player_id'])
-                    if player_id in user_scores:
-                        user_scores[player_id] *= 1.2  # Increase score by 20% for matching specializations
+                # Adjust for friends
+                if row['player_id'] in relationships["friends"]:
+                    score *= 0.8
+                return score
 
-            # Exclude the requesting user from recommendations
-            if user_id in user_scores:
-                user_scores[user_id] = min(user_scores.values()) - 1  # Lower the requesting user's score
+            df['score'] = df.apply(adjust_score, axis=1)
 
-            # Sort users by scores in descending order
-            sorted_users = sorted(user_scores.items(), key=lambda x: x[1], reverse=True)
+            # Exclude the requesting user and sort by score
+            df = df[df['player_id'] != user_id]
+            top_users = df.nlargest(num_recommendations, 'score')
 
-            # Limit to the top recommendations
-            top_user_ids = [str(user_id) for user_id, _ in sorted_users][:num_recommendations]
+            # Prepare detailed response
+            recommended_users = [
+                {
+                    "user_id": row['player_id'],
+                    "country": row['country'],
+                    "age": int(row['age']),
+                    "recommendation_expertise": row['recommendation_expertise'],
+                    "interests": row['user_interests'],
+                    "recommendation_specialization": specializations_map.get(row['player_id'], [])
+                }
+                for _, row in top_users.iterrows()
+            ]
 
-            # Prepare detailed response with user info
-            recommended_users = []
-            for uid in top_user_ids:
-                user_info = df[df['player_id'] == uid].iloc[0]
-                recommended_users.append({
-                    "user_id": int(user_info['player_id']),
-                    #"score": round(user_scores[uid], 2),
-                    "country": user_info['country'],
-                    "age": int(user_info['age']),
-                    "recommendation_expertise": user_info['recommendation_expertise'],
-                    "interests": user_info['user_interests'],
-                    #"specialization": user_info['specialization'],  # Include specialization in the response
-                    "user_specialization": [],
-                    "recommendation_specialization": []
-                })
-
-            # Prepare the response object
+            # Final response
             response = {
                 "game_id": int(game_id),
                 "user_id": str(user_id),
                 "offset": int(offset),
-                "recommended_users": recommended_users
+                "user_specialization": user_specializations,
+                "recommended_users": recommended_users,
             }
-
-            # Write the response to a JSON file
-            # with open('response.json', 'w') as json_file:
-            #     json.dump(response, json_file, indent=4)
 
             return response
 
         except Exception as e:
             raise ValueError(f"An error occurred while generating recommendations: {str(e)}")
-
 
 
 def plot_loss(history):
@@ -242,7 +241,7 @@ def plot_loss(history):
 
 if __name__ == "__main__":
     # Load your data and initialize the model, dataset preparer, and mapping layer here
-    data_loader = DataLoader('Datasets/data.json')
+    data_loader = DataLoader('../Datasets/data.json')
     raw_data = data_loader.load_data()
 
     preprocessor = DataPreprocessor()
@@ -265,7 +264,7 @@ if __name__ == "__main__":
     test_dataset = train_dataset  # Replace with actual test dataset
     history = model_trainer.train_model(train_dataset, test_dataset)
     
-    siamese_model.save('../Gamer_Recommendation/models/siamese_model.keras')
+    # siamese_model.save('../Gamer_Recommendation/models/siamese_model.keras')
     
     plot_loss(history)
 
@@ -273,19 +272,22 @@ if __name__ == "__main__":
         model=siamese_model, vae_model=vae_model, dataset_preparer=dataset_preparer, mapping_layer=mapping_layer)
 
     
-    game_id= 252950
-    user_id= "820BKNsM0PI"
+    game_id= 578080
+    user_id= "dCUKB2Vf9Zk"
     offset=10
     num_recommendations=2
     filters= {
-        "friend_type": "Pro",
-        "country": "Germany",
-        "user_interests": ["Action", "MOBA", "Strategy", "Indie", "RPG"]
+        "recommendation_expertise": "beginner",
+        "recommendation_specialisation": "Strategy",
+        "country": "India",
+        "user_interests": ["Action", "MOBA", "Strategy", "Indie", "RPG", "New Interest 1"],
+        "age_delta": 7
     }
     
 
     result = recommendation_system.recommend_top_users(
         df=preprocessed_data, game_id=game_id, user_id=user_id,offset=offset,num_recommendations=num_recommendations, filters=filters)
     
-    print(json.dumps(result, indent=2))
+    print(result)
+    # print(json.dumps(result, indent=2))
 
