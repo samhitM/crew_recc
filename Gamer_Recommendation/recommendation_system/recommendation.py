@@ -21,6 +21,12 @@ from models.siamese_recommendation_model import SiameseRecommendationModel
 from util.model_trainer import ModelTrainer
 from core.database import get_interaction_type,get_specialisations
 
+import warnings
+from requests.exceptions import RequestException
+
+from urllib3.exceptions import InsecureRequestWarning
+warnings.filterwarnings("ignore", category=InsecureRequestWarning)
+
 
 # Set random seed for reproducibility
 np.random.seed(42)
@@ -35,10 +41,12 @@ class RecommendationSystem:
 
     def fetch_user_relations(self, jwt_token=None, limit=50, offset=0, relation=None):
         """Fetch user relations with optional pagination and filtering."""
+        
+        jwt_token="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI4UHpJOG5FUXU1TCIsImVtYWlsIjoieWFzaHlhZGF2MDBAZmxhc2guY28iLCJpYXQiOjE3MzIxOTE3MjYsImV4cCI6MTczNzM3NTcyNn0.DeRiGzNUflr6_8CSqrw3K7UkybEb8pJe9ocD9Gs5Axs"
+        
         headers = {
             'Authorization': f'Bearer {jwt_token}'
         }
-        
         # Set up the query parameters
         params = {
             'limit': limit,
@@ -52,19 +60,20 @@ class RecommendationSystem:
         
         try:
             # Send the POST request with headers, query parameters, and request body
-            response = requests.post(
+            response = requests.get(
                 'https://localhost:3000/api/user/relations', ## Modify this when server gets hosted
                 headers=headers, 
                 params=params,
                 json=data,
+                verify=False
             )
-            
+
             if response.status_code == 200:
                 # Parse the JSON response
                 relations = response.json()
                 return [
                     {
-                        "user_id": r["user_id"],
+                        "player_id": r["user_id"],
                         "relation": relation,
                         "user_interests": r.get("user_interests", []),
                         "played_games": r.get("played_games", []),
@@ -80,7 +89,7 @@ class RecommendationSystem:
                 raise ValueError(f"Failed to fetch relations. Status code: {response.status_code}")
         except requests.exceptions.RequestException as e:
             raise ValueError(f"An error occurred while fetching relations: {str(e)}")
-
+        
 
     def process_filters(self, df, game_id, country, recommendation_expertise, user_interests, age, delta=None):
         """Filter the dataframe based on game_id and other filters, with case-insensitive comparisons."""
@@ -95,21 +104,21 @@ class RecommendationSystem:
             if filtered_df.empty:
                 return filtered_df
 
-        # Filter by recommendation_expertise (case-insensitive)
+        # # Filter by recommendation_expertise (case-insensitive)
         if recommendation_expertise:
             filtered_df = filtered_df[filtered_df['recommendation_expertise'].str.lower() == recommendation_expertise.lower()]
             if filtered_df.empty:
                 return filtered_df
 
-        # Filter by user_interests (case-insensitive)
+        # # Filter by user_interests (case-insensitive)
         if user_interests:
-            user_interests = [interest.lower() for interest in user_interests]  # Convert list to lowercase
+            user_interests = [interest.lower() for interest in user_interests]  # Convert user interests list to lowercase
             filtered_df = filtered_df[
-                filtered_df['user_interests'].apply(lambda x: any(interest in x.lower() for interest in user_interests))
+                filtered_df['user_interests'].apply(lambda x: any(interest in [i.lower() for i in x] for interest in user_interests))
             ]
             if filtered_df.empty:
                 return filtered_df
-
+            
         # Filter by DOB with delta (no change needed for numeric values)
         if delta:
             filtered_df = filtered_df[
@@ -139,15 +148,14 @@ class RecommendationSystem:
                 )
             if df.empty:
                 return {"game_id": game_id, "user_id": user_id, "recommended_users": []}
-
+            
             # Fetch user relationships in a single batch
             relationships = {
-                "friends": set(self.fetch_user_relations(jwt_token=jwt_token, limit=50, offset=0, relation="friends")),
-                "blocked": set(self.fetch_user_relations(jwt_token=jwt_token, limit=50, offset=0, relation="blocked_list")),
-                "reported": set(self.fetch_user_relations(jwt_token=jwt_token, limit=50, offset=0, relation="reported_list")),
+                "friends": set(relation['player_id'] for relation in self.fetch_user_relations(jwt_token=jwt_token, limit=50, offset=0, relation="friends")),
+                "blocked": set(relation['player_id'] for relation in self.fetch_user_relations(jwt_token=jwt_token, limit=50, offset=0, relation="blocked_list")),
+                "reported": set(relation['player_id'] for relation in self.fetch_user_relations(jwt_token=jwt_token, limit=50, offset=0, relation="report_list"))
             }
             
-
             # Exclude blocked and reported users early
             df = df[~df['player_id'].isin(relationships["blocked"] | relationships["reported"])]
             if df.empty:
