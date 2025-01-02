@@ -35,7 +35,6 @@ class RecommendationSystem:
 
     def fetch_user_relations(self, jwt_token=None, limit=50, offset=0, relation=None):
         """Fetch user relations with optional pagination and filtering."""
-        return []
         headers = {
             'Authorization': f'Bearer {jwt_token}'
         }
@@ -83,42 +82,44 @@ class RecommendationSystem:
             raise ValueError(f"An error occurred while fetching relations: {str(e)}")
 
 
-    def process_filters(self, df, game_id, country, recommendation_expertise, user_interests,age, delta=None):
-        """Filter the dataframe based on game_id and other filters."""
-        # Filter by game_id
+    def process_filters(self, df, game_id, country, recommendation_expertise, user_interests, age, delta=None):
+        """Filter the dataframe based on game_id and other filters, with case-insensitive comparisons."""
+        # Filter by game_id (no change needed for game_id)
         filtered_df = df[df['game_id'] == game_id]
         if filtered_df.empty:
             return filtered_df  # Return empty DataFrame early
 
-        # Filter by country
+        # Filter by country (case-insensitive)
         if country:
-            filtered_df = filtered_df[filtered_df['country'] == country]
+            filtered_df = filtered_df[filtered_df['country'].str.lower() == country.lower()]
             if filtered_df.empty:
                 return filtered_df
 
-        # Filter by recommendation_expertise
+        # Filter by recommendation_expertise (case-insensitive)
         if recommendation_expertise:
-            filtered_df = filtered_df[filtered_df['recommendation_expertise'] == recommendation_expertise]
+            filtered_df = filtered_df[filtered_df['recommendation_expertise'].str.lower() == recommendation_expertise.lower()]
             if filtered_df.empty:
                 return filtered_df
-        
-        # Filter by user_interests
+
+        # Filter by user_interests (case-insensitive)
         if user_interests:
+            user_interests = [interest.lower() for interest in user_interests]  # Convert list to lowercase
             filtered_df = filtered_df[
-                filtered_df['user_interests'].apply(lambda x: any(interest in x for interest in user_interests))
+                filtered_df['user_interests'].apply(lambda x: any(interest in x.lower() for interest in user_interests))
             ]
             if filtered_df.empty:
                 return filtered_df
 
-        # Filter by DOB with delta
+        # Filter by DOB with delta (no change needed for numeric values)
         if delta:
             filtered_df = filtered_df[
-                (filtered_df['age'] >= age-delta) & (filtered_df['age'] <= age+delta)
+                (filtered_df['age'] >= age - delta) & (filtered_df['age'] <= age + delta)
             ]
             if filtered_df.empty:
                 return filtered_df
 
         return filtered_df
+
 
     def recommend_top_users(self, df, game_id, user_id, offset, num_recommendations=20, filters=None, jwt_token=None):
         try:

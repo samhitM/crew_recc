@@ -112,4 +112,67 @@ def get_specialisations(user_id: str):
         raise HTTPException(status_code=500, detail=f"Error fetching specialisations: {str(e)}")
     finally:
         conn.close()
+        
+def get_user_message_stats(user_id: str):
+    """
+    Fetches total messages grouped by topic ID for a given user,
+    along with topic members and last message time, sorted by message count and topic members' length.
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            query = """
+                SELECT 
+                    tm.topic_id,
+                    tm.member_id,
+                    tm.role,
+                    tm.is_muted,
+                    COUNT(m.id) AS total_messages,
+                    ARRAY_AGG(DISTINCT tm.member_id) AS topic_members,
+                    MAX(m.created_ts) AS last_message_time
+                FROM 
+                    topic_member tm
+                LEFT JOIN 
+                    message m ON tm.topic_id = m.topic_id
+                WHERE 
+                    tm.member_id = %s
+                GROUP BY 
+                    tm.topic_id, tm.member_id, tm.role, tm.is_muted
+                ORDER BY 
+                    total_messages DESC, LENGTH(ARRAY_TO_STRING(ARRAY_AGG(DISTINCT tm.member_id), ',')) DESC;
+            """
+            cur.execute(query, (user_id,))
+            results = cur.fetchall()
+
+            # Process results into a dictionary format for JSON-like response
+            data = [
+                {
+                    "topicId": row[0],
+                    "memberId": row[1],
+                    "role": row[2],
+                    "isMuted": row[3],
+                    "totalMessages": row[4],
+                    "topicMembers": row[5],
+                    "lastMessageTime": row[6],
+                }
+                for row in results
+            ]
+            return {"userStats": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching user message stats: {str(e)}")
+    finally:
+        conn.close()
+
+        
+if __name__ == "__main__":
+    # Test the new function
+    user_id = "4iGFY2u1rrh" 
+    try:
+        result = get_user_message_stats(user_id)
+        print(result)  
+    except Exception as e:
+        print(f"Error during function testing: {e}")
+
+        
+
 
