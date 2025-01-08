@@ -163,6 +163,44 @@ def get_user_message_stats(user_id: str):
     finally:
         conn.close()
 
+
+def fetch_field(user_id: str, column: str, table: str, default_value=0):
+    """
+    Fetches a specific field for a user from the given table.
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            query = sql.SQL("SELECT {column} FROM {table} WHERE user_id = %s").format(
+                column=sql.Identifier(column),
+                table=sql.Identifier(table)
+            )
+            cur.execute(query, (user_id,))
+            result = cur.fetchone()
+            return result[0] if result and result[0] is not None else default_value
+    except Exception as e:
+        return default_value
+    finally:
+        conn.close()
+
+def update_crew_level(user_id: str, level: int, score: float):
+    """
+    Updates the crew level and composite score for a user in the database.
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            query = """
+                UPDATE user_levels
+                SET crew_level = %s, composite_score = %s
+                WHERE user_id = %s;
+            """
+            cur.execute(query, (level, score, user_id))
+            conn.commit()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating crew level for user {user_id}: {str(e)}")
+    finally:
+        conn.close()
         
 if __name__ == "__main__":
     # Test the new function
