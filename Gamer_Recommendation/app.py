@@ -4,8 +4,8 @@ from typing import Optional
 
 from services.token_utils import validate_secret_key
 from services.recommendation_utils import load_data, compute_recommendations, attach_usernames
-from core.database import get_username
-from recommendation_cache import recommendation_cache
+from database import get_username
+from cache.recommendation_cache import recommendation_cache
 
 app = FastAPI()
 
@@ -39,6 +39,7 @@ async def get_recommendations(
             "user_id": request.user_id,
             "username": requesting_username,
             "offset": request.offset,
+            "user_specialisations": top_users["user_specialization"],
             "recommended_users": top_users["recommended_users"]
         }
 

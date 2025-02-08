@@ -137,8 +137,13 @@ class DataPreprocessor:
         for platform in platform_set:
             df[f'platforms_{platform}'] = df['platforms'].apply(lambda x: 1 if platform in x else 0)
 
+        new_columns = {}
         for medium in medium_set:
-            df[f'medium_{medium}'] = df['medium'].apply(lambda x: 1 if medium in x else 0)
+            new_columns[f'medium_{medium}'] = df['medium'].apply(lambda x: 1 if medium in x else 0)
+
+        # Concatenate all new columns at once
+        df = pd.concat([df, pd.DataFrame(new_columns)], axis=1)
+
 
         # Drop original columns for one-hot encoded features
         df = df.drop(columns=['genres', 'platforms', 'medium'])

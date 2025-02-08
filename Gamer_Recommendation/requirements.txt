@@ -7,8 +7,12 @@ pandas
 scikit-learn
 matplotlib
 jwt
+pyjwt
 kafka-python
 psycopg2-binary
 httpx
 google-cloud-secret-manager
 apscheduler
+networkx
+seaborn
+requests
