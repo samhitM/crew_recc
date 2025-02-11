@@ -25,7 +25,7 @@ class RecommendationSystem:
         self.dataset_preparer = dataset_preparer
         self.mapping_layer = mapping_layer
 
-    def recommend_top_users(self, df, game_id, user_id, offset, num_recommendations=20, filters=None, jwt_token=None):
+    def recommend_top_users(self, df, game_id, user_id, offset, num_recommendations=20, filters=None):
         """
         Generates a list of recommended users based on various filters and a predictive model.
 
@@ -36,7 +36,6 @@ class RecommendationSystem:
             offset (int): The starting index for recommendations (used for pagination).
             num_recommendations (int, optional): The number of users to recommend (default: 20).
             filters (dict, optional): Additional filtering criteria such as country, expertise, and interests.
-            jwt_token (str, optional): Authentication token for API requests.
 
         Returns:
             dict: A dictionary containing the game ID, user ID, and a list of recommended users.
@@ -59,7 +58,7 @@ class RecommendationSystem:
             if df.empty:
                 return {"game_id": game_id, "user_id": user_id, "recommended_users": []}
             
-            api_client = APIClient(API_BASE_URL, jwt_token)
+            api_client = APIClient(API_BASE_URL,user_id)
             
             # Fetch user relationships in a single batch
             relationships = {

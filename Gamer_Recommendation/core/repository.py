@@ -1,26 +1,21 @@
 import jwt as pyjwt
 from fastapi import HTTPException
-import core.config as config
+from core.config import JWT_SECRET_KEY
 
-def verify_token(token) -> str:
-    # Attempt to decode the provided JWT token
+def verify_token(token: str) -> dict:
+    """
+    Decodes and verifies a JWT token, returning the payload.
+    """
     try:
-        payload = pyjwt.decode(token, config.SECRET_KEY, algorithms=["HS256"])
-        
-        # Extract crew user ID from token payload
-        crew_user_id = payload.get("userId")
-        
-        # Raise an error if crew user ID is not present in the token
-        if crew_user_id is None:
-            raise HTTPException(status_code=403, detail="Unauthorized: crew user_id missing.")
-        
-        # Return the extracted crew user ID if validation is successful
-        return crew_user_id
+        payload = pyjwt.decode(token, JWT_SECRET_KEY, algorithms=["HS256"])
+        print("Decoded Payload:", payload)  # Debugging output
+        if not payload.get("userId"):
+            raise HTTPException(status_code=403, detail="Unauthorized: Missing userId in token.")
 
-    # Handle expired token error
+        return payload  # Return full payload
+
     except pyjwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired.")
     
-    # Handle any other invalid token errors
     except pyjwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token.")

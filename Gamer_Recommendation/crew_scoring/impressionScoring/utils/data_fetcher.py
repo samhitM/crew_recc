@@ -15,6 +15,7 @@ from typing import List, Dict, Optional
 from impressionScoring.config.constants import DEFAULT_VALUES
 from impressionScoring.config.query_config import QueryConfig
 from datetime import datetime
+from services.token_utils import generate_jwt_token
 
 from core.config import VERIFY_SSL
 
@@ -23,9 +24,8 @@ warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
 
 class DataFetcher:
-    def __init__(self, api_url: str, jwt_token: str, user_ids: List[str]):
+    def __init__(self, api_url: str, user_ids: List[str]):
         self.api_url = api_url
-        self.headers = {"Authorization": f"Bearer {jwt_token}"}
         self.user_ids = user_ids  
 
     def initialize_default_user_data(self) -> Dict[str, Dict[str, float]]:
@@ -37,11 +37,12 @@ class DataFetcher:
         """
         return {user_id: DEFAULT_VALUES.copy() for user_id in self.user_ids}
 
-    def _make_request(self, url: str, params=None, json_data=None):
+    def _make_request(self, url: str, user_id: str, params=None, json_data=None):
         """Helper function to make GET requests."""
+        headers = {"Authorization": f"Bearer {generate_jwt_token(user_id)}"}
         try:
             response = requests.get(
-                url, headers=self.headers, params=params, json=json_data, verify=VERIFY_SSL, timeout=10
+                url, headers=headers, params=params, json=json_data, verify=VERIFY_SSL, timeout=10
             )
             if response.status_code == 200:
                 return response.json()
@@ -60,7 +61,7 @@ class DataFetcher:
         profile_data = self.initialize_default_user_data()
 
         for user_id in self.user_ids:
-            response = self._make_request(url, params={"user_id": user_id})
+            response = self._make_request(url,user_id,params={"user_id": user_id})
             if response:
                 profile_data[user_id].update({
                     "Out_Degree": response.get("total_friends", DEFAULT_VALUES["Out_Degree"]),
@@ -192,7 +193,8 @@ class DataFetcher:
         url = f"{self.api_url}/users/relations"
         params = {"limit": limit, "offset": offset}
         data = {"relation": relation, "user_id": user_id} if user_id else {"relation": relation}
-        return self._make_request(url, params=params, json_data=data) or []
+        print("Fetching for:",user_id)
+        return self._make_request(url, user_id=user_id, params=params, json_data=data) or []
     
 
     def _fetch_user_post_timestamps(self) -> Dict[str, Optional[datetime]]:

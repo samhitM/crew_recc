@@ -1,44 +1,32 @@
 import requests
 import warnings
+from services.token_utils import generate_jwt_token
 from urllib3.exceptions import InsecureRequestWarning
-from core.config import VERIFY_SSL
+from core.config import VERIFY_SSL, JWT_SECRET_KEY
+
+warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
 warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
 class APIClient:
-    def __init__(self, base_url, jwt_token):
+    def __init__(self, base_url,user_id):
         self.base_url = base_url.rstrip('/')
-        self.jwt_token = jwt_token
+        self.user_id = user_id,
+        self.jwt_token = generate_jwt_token(self.user_id)  # Automatically generate token
         self.headers = {
             'Authorization': f'Bearer {self.jwt_token}'
         }
 
-    def fetch_user_relations(self, limit=50, offset=0, relation=None):
-        """
-        Fetch user relations with optional pagination and filtering.
-
-        Parameters:
-            limit (int): The number of records to fetch per request (default: 50).
-            offset (int): The offset for pagination (default: 0).
-            relation (str, optional): The type of relation to filter (e.g., "friends", "blocked_list", "report_list").
-
-        Returns:
-            list[dict]: A list of user relation records with keys:
-                - "player_id" (str): The user ID.
-                - "relation" (str): The type of relation.
-                - "user_interests" (list): Interests of the user.
-                - "played_games" (list): Games the user has played.
-                - "last_active_ts" (str): Last active timestamp.
-        
-        Raises:
-            ValueError: If an error occurs during the API request.
-        """
+    def fetch_user_relations(self,limit=50, offset=0, relation=None):
         params = {
             'limit': limit,
             'offset': offset,
         }
-        data = {"relation": relation} if relation else {}
-        
+        data = {
+            "user_id": self.user_id,
+            "relation": relation if relation else {}
+        }
+
         try:
             response = requests.get(
                 f'{self.base_url}/api/users/relations',
@@ -47,18 +35,11 @@ class APIClient:
                 json=data,
                 verify=VERIFY_SSL
             )
+            # print(f"Response Status Code: {response.status_code}")  # Debugging
+            # print(f"Response Content: {response.text}")  # Debugging
 
             if response.status_code == 200:
-                return [
-                    {
-                        "player_id": r["id"],
-                        "relation": relation,
-                        "user_interests": r.get("user_interests", []),
-                        "played_games": r.get("played_games", []),
-                        "last_active_ts": r.get("last_active_ts", ""),
-                    }
-                    for r in response.json()
-                ]
+                return response.json()
             elif response.status_code == 404:
                 return []
             else:

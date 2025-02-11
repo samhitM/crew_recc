@@ -11,10 +11,9 @@ from core.config import API_BASE_URL
 
 if __name__ == "__main__":
     api_url = API_BASE_URL
-    jwt_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI4UHpJOG5FUXU1TCIsImVtYWlsIjoieWFzaHlhZGF2MDBAZmxhc2guY28iLCJpYXQiOjE3MzIxOTE3MjYsImV4cCI6MTczNzM3NTcyNn0.DeRiGzNUflr6_8CSqrw3K7UkybEb8pJe9ocD9Gs5Axs"
     user_ids = fetch_all_user_ids()[:2]
 
-    manager = CrewScoreManager(api_url=api_url,jwt_token=jwt_token,user_ids=user_ids)
+    manager = CrewScoreManager(api_url=api_url,user_ids=user_ids)
     all_user_data = manager.fetch_complete_user_data()
     print("All_users_data")
     print(all_user_data)

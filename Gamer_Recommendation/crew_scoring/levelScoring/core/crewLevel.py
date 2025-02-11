@@ -20,7 +20,7 @@ def main():
 
     # Fetch all user scores
     print("Fetching scores for all users...")
-    all_user_ids = fetch_all_user_ids()[:3]
+    all_user_ids = fetch_all_user_ids()
     all_scores = [manager.get_user_score(user) for user in all_user_ids]
     print(f"All scores: {all_scores}")
 

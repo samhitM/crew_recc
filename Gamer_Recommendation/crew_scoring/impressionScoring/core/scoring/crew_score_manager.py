@@ -8,7 +8,7 @@ class CrewScoreManager:
     A manager class to handle Crew Scores and user relations using a graph-based approach.
     """
     
-    def __init__(self, api_url, jwt_token, user_ids):
+    def __init__(self, api_url, user_ids):
         """
         Initialize the CrewScoreManager class with the API URL, JWT token, and user IDs.
 
@@ -18,11 +18,9 @@ class CrewScoreManager:
             user_ids (list): List of user IDs for which the graph and data need to be processed.
         """
         self.api_url = api_url
-        self.jwt_token = jwt_token
-        self.headers = {"Authorization": f"Bearer {self.jwt_token}"}
         self.graph = None  # Initialize the graph lazily
         self.user_ids = user_ids
-        self.data_fetcher = DataFetcher(api_url=api_url, jwt_token=jwt_token, user_ids=user_ids)
+        self.data_fetcher = DataFetcher(api_url=api_url, user_ids=user_ids)
 
     def build_graph(self):
         """

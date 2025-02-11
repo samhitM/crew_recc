@@ -9,10 +9,10 @@ DB_USER = 'admin_crew'
 DB_PASSWORD = 'xV/nI2+=uOI&KL1P'
 
 # Secret key for token verification
-SECRET_KEY = "1c75f472b1e52c582c8ed3f4d88af9c0137f9a2eeeb1d63e97ecedd1be8f1a3c"
+JWT_SECRET_KEY = "942bb82561c615e0d67a27538c8e203ea60423c0508956a134e4f747d88189bd"
 VALID_SECRET_KEY = '7irNPR6kOia'  # Add valid secret key as a variable for easy management
 
-API_BASE_URL = "https://localhost:3000"
+API_BASE_URL = "http://cygbg8gyg5d2fxbm.fz25.alb.azure.com"
 VERIFY_SSL = False  # Set to True if you want to verify SSL certificates
 
 def get_secret(secret_name):
