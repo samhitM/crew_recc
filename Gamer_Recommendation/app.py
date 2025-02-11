@@ -2,10 +2,11 @@ from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional
 
-from services.token_utils import validate_secret_key
+from services.token_utils import validate_token
 from services.recommendation_utils import load_data, compute_recommendations, attach_usernames
-from core.database import get_username
-from recommendation_cache import recommendation_cache
+from database import get_username
+from cache.recommendation_cache import recommendation_cache
+# from services.token_utils import generate_jwt_token
 
 app = FastAPI()
 
@@ -21,10 +22,14 @@ class RecommendationRequest(BaseModel):
 @app.post("/api/game-user-recommendations/")
 async def get_recommendations(
     request: RecommendationRequest,
-    secret_key: Optional[str] = Header(None)
+    token: Optional[str] = Header(None)
 ):
     """Handles recommendation requests, validating the secret key, loading data if needed, and returning recommendations."""
-    # validate_secret_key(secret_key)
+    extracted_user_id = validate_token(token)  # Validate token and extract userId
+    
+    # Ensure the user ID in the request matches the one in the token
+    if request.user_id != extracted_user_id:
+        raise HTTPException(status_code=403, detail="Forbidden: user_id mismatch.")
 
     if recommendation_cache.preprocessed_data is None:
         load_data()
@@ -39,6 +44,7 @@ async def get_recommendations(
             "user_id": request.user_id,
             "username": requesting_username,
             "offset": request.offset,
+            "user_specialisations": top_users["user_specialization"],
             "recommended_users": top_users["recommended_users"]
         }
 
