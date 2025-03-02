@@ -1,52 +1,37 @@
 from database.connection import get_db_connection
 from fastapi import HTTPException
 
-def get_interaction_type(user_a_id: str, user_b_id: str):
+def get_interaction_type(user_id, player_ids):
     """
-    Identifies the type of interaction between two users based on the `user_interactions` table.
-    
-    Parameters:
-    - user_a_id (str): The unique identifier of the first user.
-    - user_b_id (str): The unique identifier of the second user.
-
-    Returns:
-    - dict: A dictionary containing interaction details if found:
-        - interactionType (str): The type of interaction (e.g., 'PROFILE_INTERACTION').
-        - action (str): The specific action performed (e.g., 'friend_request', 'ignored').
-        - metadata (Any): Additional data stored in the interaction.
-        - createTimestamp (datetime): The timestamp of when the interaction occurred.
-      If no interaction is found, an empty dictionary `{}` is returned.
-
-    Raises:
-    - HTTPException (500): If a database error occurs while fetching interaction data.
+    Batch fetches interactions for a list of player_ids.
     """
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             query = """
-                SELECT interaction_type, action, metadata, create_ts
+                SELECT user_id, entity_id_primary, interaction_type, action, metadata, create_ts
                 FROM user_interactions
-                WHERE (user_id = %s AND entity_id_primary = %s AND entity_primary = 'USER')
-                   OR (user_id = %s AND entity_id_primary = %s AND entity_primary = 'USER')
-                ORDER BY create_ts DESC
-                LIMIT 1;
+                WHERE (user_id = %s AND entity_id_primary = ANY(%s) AND entity_primary = 'USER')
+                   OR (entity_id_primary = %s AND user_id = ANY(%s) AND entity_primary = 'USER')
+                ORDER BY create_ts DESC;
             """
-            cur.execute(query, (user_a_id, user_b_id, user_b_id, user_a_id))
-            result = cur.fetchone()
+            cur.execute(query, (user_id, player_ids, user_id, player_ids))
+            results = cur.fetchall()
 
-            if result:
-                return {
-                    "interactionType": result[0],
-                    "action": result[1],
-                    "metadata": result[2],
-                    "createTimestamp": result[3],
+            interaction_map = {}
+            for result in results:
+                interaction_map[result[1]] = {
+                    "interactionType": result[2],
+                    "action": result[3],
+                    "metadata": result[4],
+                    "createTimestamp": result[5],
                 }
-            else:
-                return {}  # Return an empty dictionary if no interaction is found
+            return interaction_map
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching interaction type: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching interactions: {str(e)}")
     finally:
         conn.close()
+
         
 # def fetch_user_interactions(user_id: str):
 #     """

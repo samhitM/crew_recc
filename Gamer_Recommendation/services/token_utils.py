@@ -22,7 +22,7 @@ def generate_jwt_token(user_id):
         """
         payload = {
             "userId": user_id, 
-            "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)  # 1-hour expiry
+            "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=24)  # 24-hour expiry
         }
         token = jwt.encode(payload, JWT_SECRET_KEY, algorithm="HS256")
         return token

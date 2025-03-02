@@ -40,10 +40,21 @@ class RecommendationSystem:
         Returns:
             dict: A dictionary containing the game ID, user ID, and a list of recommended users.
         """
-    
+        
         try:
-            user_dob = df[df['player_id'] == user_id]['age'].values[0]
-            user_specializations = get_specialisations(user_id=user_id)  
+            user_age = df[df['player_id'] == user_id]['age']
+            if user_age.empty:
+                return {
+                    "game_id": game_id,
+                    "user_id": user_id,
+                    "offset": offset,
+                    "user_specialization": [],
+                    "recommended_users": []
+                }
+            user_dob = user_age.values[0]
+            
+            all_specializations = get_specialisations(df['player_id'].tolist())
+            user_specializations = all_specializations.get(user_id, [])
             
             if filters:
                  df = DataFilter.process_filters(
@@ -56,7 +67,14 @@ class RecommendationSystem:
                     filters.get('age_delta', 12)
                 )
             if df.empty:
-                return {"game_id": game_id, "user_id": user_id, "recommended_users": []}
+                return {
+                    "game_id": game_id,
+                    "user_id": user_id,
+                    "offset": offset,
+                    "user_specialization": [],
+                    "recommended_users": []
+                }
+                 
             
             api_client = APIClient(API_BASE_URL,user_id)
             
@@ -70,9 +88,15 @@ class RecommendationSystem:
             # Exclude blocked and reported users early
             df = df[~df['player_id'].isin(relationships["blocked"] | relationships["reported"])]
             if df.empty:
-                return {"game_id": game_id, "user_id": user_id, "recommended_users": []}
+               return {
+                    "game_id": game_id,
+                    "user_id": user_id,
+                    "offset": offset,
+                    "user_specialization": [],
+                    "recommended_users": []
+                }
             
-
+            
             # Map game_id and user_id to indices
             game_idx = self.mapping_layer.map_game_id(game_id)
             user_idx = self.mapping_layer.map_user_id(user_id)
@@ -94,9 +118,11 @@ class RecommendationSystem:
             if min_score < 0:
                 df['score'] -= min_score  # Normalize scores to non-negative
 
+
             # Pre-fetch interactions and specializations for optimization
-            interaction_map = {row['player_id']: get_interaction_type(user_id, row['player_id']) for _, row in df.iterrows()}
-            specializations_map = {row['player_id']: get_specialisations(row['player_id']) for _, row in df.iterrows()}
+            player_ids = df['player_id'].tolist()
+            interaction_map = get_interaction_type(user_id, player_ids)
+            specializations_map = get_specialisations(player_ids)
 
             # Adjust scores for interactions
             df['score'] = df.apply(lambda row: ScoreAdjuster.adjust_score(row, interaction_map, relationships), axis=1)
@@ -135,7 +161,7 @@ class RecommendationSystem:
 
 if __name__ == "__main__":
     # Load your data and initialize the model, dataset preparer, and mapping layer here
-    data_loader = DataLoader('../Datasets/data.json')
+    data_loader = DataLoader('../Datasets/request.json')
     raw_data = data_loader.load_data()
 
     preprocessor = DataPreprocessor()
@@ -169,7 +195,7 @@ if __name__ == "__main__":
     game_id= 578080
     user_id= "dCUKB2Vf9Zk"
     offset=10
-    num_recommendations=2
+    num_recommendations=10
     filters= {
         "recommendation_expertise": "beginner",
         "recommendation_specialisation": "Strategy",

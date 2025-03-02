@@ -8,7 +8,8 @@ def verify_token(token: str) -> dict:
     """
     try:
         payload = pyjwt.decode(token, JWT_SECRET_KEY, algorithms=["HS256"])
-        print("Decoded Payload:", payload)  # Debugging output
+        # print(payload)
+        # print("Decoded Payload:", payload)  # Debugging output
         if not payload.get("userId"):
             raise HTTPException(status_code=403, detail="Unauthorized: Missing userId in token.")
 

@@ -6,7 +6,6 @@ tensorflow==2.17.0
 pandas
 scikit-learn
 matplotlib
-jwt
 pyjwt
 kafka-python
 psycopg2-binary

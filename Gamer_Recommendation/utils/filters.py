@@ -44,7 +44,7 @@ class DataFilter:
             ]
             if filtered_df.empty:
                 return filtered_df
-            
+        
         # Filter by age range with delta
         if age is not None and delta is not None:
             filtered_df = filtered_df[
@@ -52,5 +52,6 @@ class DataFilter:
             ]
             if filtered_df.empty:
                 return filtered_df
+
 
         return filtered_df

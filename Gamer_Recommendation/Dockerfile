@@ -4,32 +4,38 @@ FROM python:3.10.12-slim
 WORKDIR /app
 
 # Copy the requirements file
-COPY Gamer_Recommendation/requirements.txt ./requirements.txt
+COPY requirements.txt ./requirements.txt
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the main application file
-COPY Gamer_Recommendation/app.py ./app.py
+COPY app.py ./app.py
 
 # Copy the recommendation system files
-COPY Gamer_Recommendation/recommendation_cache.py ./recommendation_cache.py
-COPY Gamer_Recommendation/recommendation_system/ ./recommendation_system/
+COPY cache/ ./cache/
+COPY recommendation_system/ ./recommendation_system/
 
 # Copy the core files
-COPY Gamer_Recommendation/core/ ./core/
+COPY core/ ./core/
 
 # Copy the models
-COPY Gamer_Recommendation/models/ ./models/
+COPY models/ ./models/
 
 # Copy the services
-COPY Gamer_Recommendation/services/ ./services/
+COPY services/ ./services/
 
 # Copy the utility files
-COPY Gamer_Recommendation/util/ ./util/
+COPY utils/ ./utils/
+
+# Copy the database files
+COPY database/ ./database/
+
+# Copy the crew_scoring files
+COPY crew_scoring/ ./crew_scoring/
 
 # Copy the data_preprocessing files
-COPY Gamer_Recommendation/data_preprocessing/ ./data_preprocessing/
+COPY data_preprocessing/ ./data_preprocessing/
 
 # Expose the app port
 EXPOSE 8000

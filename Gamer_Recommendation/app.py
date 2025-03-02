@@ -6,7 +6,7 @@ from services.token_utils import validate_token
 from services.recommendation_utils import load_data, compute_recommendations, attach_usernames
 from database import get_username
 from cache.recommendation_cache import recommendation_cache
-# from services.token_utils import generate_jwt_token
+from services.token_utils import generate_jwt_token
 
 app = FastAPI()
 
@@ -25,7 +25,7 @@ async def get_recommendations(
     token: Optional[str] = Header(None)
 ):
     """Handles recommendation requests, validating the secret key, loading data if needed, and returning recommendations."""
-    extracted_user_id = validate_token(token)  # Validate token and extract userId
+    extracted_user_id = validate_token(generate_jwt_token(request.user_id))  # Validate token and extract userId
     
     # Ensure the user ID in the request matches the one in the token
     if request.user_id != extracted_user_id:
