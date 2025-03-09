@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional
-
+from core.config import CREW_USER_ID
 from services.token_utils import validate_token
 from services.recommendation_utils import load_data, compute_recommendations, attach_usernames
 from database import get_username
@@ -25,10 +25,10 @@ async def get_recommendations(
     token: Optional[str] = Header(None)
 ):
     """Handles recommendation requests, validating the secret key, loading data if needed, and returning recommendations."""
-    extracted_user_id = validate_token(generate_jwt_token(request.user_id))  # Validate token and extract userId
-    
+    extracted_user_id = validate_token(token)  # Validate token and extract userId
+    print(extracted_user_id)
     # Ensure the user ID in the request matches the one in the token
-    if request.user_id != extracted_user_id:
+    if CREW_USER_ID != extracted_user_id:
         raise HTTPException(status_code=403, detail="Forbidden: user_id mismatch.")
 
     if recommendation_cache.preprocessed_data is None:
