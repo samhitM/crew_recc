@@ -2,11 +2,10 @@ from google.cloud import secretmanager
 import os
 
 # Database connection settings
-DB_HOST = '34.44.52.84'
-DB_PORT = 5432
-DATABASE = 'crewdb'
-DB_USER = 'admin_crew'
-DB_PASSWORD = 'xV/nI2+=uOI&KL1P'
+DB_CONFIG = {
+    "crewdb": {"host": "34.44.52.84", "port": 5432, "user": "admin_crew", "password": "xV/nI2+=uOI&KL1P"},
+    # Add other databases here
+}
 
 # Secret key for token verification
 JWT_SECRET_KEY = "942bb82561c615e0d67a27538c8e203ea60423c0508956a134e4f747d88189bd"

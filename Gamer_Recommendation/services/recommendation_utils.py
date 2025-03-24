@@ -1,8 +1,8 @@
-from database import get_endpoint_data
+from database import get_endpoint_data, fetch_all_users_data
 from recommendation_system import RecommendationSystem
 from data_preprocessing import DataPreprocessor, DatasetPreparer, MappingLayer
 from models import SiameseRecommendationModel
-from cache import RecommendationCache
+from cache.recommendation_cache import recommendation_cache
 from utils import ModelTrainer
 import threading
 import time
@@ -18,66 +18,108 @@ dataset_preparer = DatasetPreparer()
 model_trained = False
 
 # Function to load data and initialize recommendation system components
+import time
+
 def load_data():
     try:
         players_stats = get_endpoint_data().get('playersStats', {})
-        RecommendationCache.preprocessed_data = preprocessor.preprocess(players_stats)
-        RecommendationCache.mapping_layer = MappingLayer(RecommendationCache.preprocessed_data)
+        recommendation_cache.update_preprocessed_data(preprocessor.preprocess(players_stats))
+        recommendation_cache.update_mapping_layer(MappingLayer(recommendation_cache.preprocessed_data))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading data: {str(e)}")
+    
+
+def initialize_recommendation_system():
+    global model_trained
+    try:
+        print("Initializing recommendation system with pre-trained model...")
+        load_data()
+        
+        # Prepare training and validation datasets
+        train_dataset = dataset_preparer.prepare_tf_dataset(recommendation_cache.preprocessed_data,
+                                                            recommendation_cache.mapping_layer)
+        
+        # Initialize and train a new model
+        num_users = len(recommendation_cache.preprocessed_data['player_id'].unique())
+        num_games = len(recommendation_cache.preprocessed_data['game_id'].unique())
+
+        embedding_dim = 512
+        siamese_model = SiameseRecommendationModel(num_users=num_users, num_games=num_games, embedding_dim=embedding_dim)
+        model_trainer = ModelTrainer(model=siamese_model, learning_rate=0.001, batch_size=128, epochs=65)
+        model_trainer.train_model(train_dataset, train_dataset)
+        
+        # Update the recommendation system with the new model
+        recommendation_cache.update_recommendation_system(
+            RecommendationSystem(
+                model=siamese_model,
+                dataset_preparer=dataset_preparer,
+                mapping_layer=recommendation_cache.mapping_layer
+            )
+        )
+
+        print("Preloaded recommendation system.")
+        model_trained = True # Mark the model as trained
+    except Exception as e:
+        print(f"Error during model initialization: {e}")
+
+# Lock to ensure thread safety when updating the cache
+recommendation_cache_lock = threading.Lock()
 
 # Function to train model at specified intervals, starting 1 hour before midnight IST
 def periodic_model_training():
     global model_trained
-    # Define IST timezone
     ist = pytz.timezone('Asia/Kolkata')
     interval_hours = 8  # Run every 8 hours
 
     while True:
-        # Get current time in IST
         now = datetime.now(ist)
 
         # Calculate the next scheduled time (1 hour before midnight, and every 8 hours after that)
         midnight_ist = now.replace(hour=23, minute=0, second=0, microsecond=0)
-        if now > midnight_ist:  # If it's past 11 PM, calculate for the next day
+        if now > midnight_ist:
             midnight_ist += timedelta(days=1)
-        
+
         next_run_time = midnight_ist
         while next_run_time <= now:
             next_run_time += timedelta(hours=interval_hours)
 
-        # Wait until the next run time
         wait_seconds = (next_run_time - now).total_seconds()
         print(f"Next model training scheduled at: {next_run_time.strftime('%Y-%m-%d %H:%M:%S IST')}")
         time.sleep(wait_seconds)
 
-        # Start the model training process
+        # Start model training
         try:
             print(f"Model training started at: {datetime.now(ist).strftime('%Y-%m-%d %H:%M:%S IST')}")
-            load_data()
+            load_data("Periodic model")
 
-            # Prepare training and validation datasets
-            train_dataset = dataset_preparer.prepare_tf_dataset(RecommendationCache.preprocessed_data,
-                                                                RecommendationCache.mapping_layer)
-            test_dataset = train_dataset  # For simplicity, using the same dataset for validation
+            # Prepare datasets
+            with recommendation_cache_lock:
+                train_dataset = dataset_preparer.prepare_tf_dataset(
+                    recommendation_cache.preprocessed_data,
+                    recommendation_cache.mapping_layer
+                )
 
-            # Initialize and train a new model
-            num_users = len(RecommendationCache.preprocessed_data['player_id'].unique())
-            num_games = len(RecommendationCache.preprocessed_data['game_id'].unique())
+            num_users = len(recommendation_cache.preprocessed_data['player_id'].unique())
+            num_games = len(recommendation_cache.preprocessed_data['game_id'].unique())
             embedding_dim = 512
-            siamese_model = SiameseRecommendationModel(num_users=num_users, num_games=num_games, embedding_dim=embedding_dim)
-            model_trainer = ModelTrainer(model=siamese_model, learning_rate=0.001, batch_size=128, epochs=65)
-            history = model_trainer.train_model(train_dataset, test_dataset)
 
-            # Update the recommendation system with the new model
-            RecommendationCache.recommendation_system = RecommendationSystem(
-                model=siamese_model,
-                dataset_preparer=dataset_preparer,
-                mapping_layer=RecommendationCache.mapping_layer
+            siamese_model = SiameseRecommendationModel(
+                num_users=num_users, num_games=num_games, embedding_dim=embedding_dim
             )
+            model_trainer = ModelTrainer(model=siamese_model, learning_rate=0.001, batch_size=128, epochs=65)
+            model_trainer.train_model(train_dataset, train_dataset)  # Using train dataset for validation
+
+            with recommendation_cache_lock:
+                print("Updating recommendation system...")
+                del recommendation_cache.recommendation_system  # Free memory
+                recommendation_cache.update_recommendation_system(RecommendationSystem(
+                    model=siamese_model,
+                    dataset_preparer=dataset_preparer,
+                    mapping_layer=recommendation_cache.mapping_layer
+                ))
 
             print("Model retrained and recommendation system updated.")
-            model_trained = True  # Mark the model as trained
+            model_trained = True
         except Exception as e:
             print(f"Error during model training: {e}")
 
@@ -106,33 +148,10 @@ def compute_recommendations(request):
     # Check if model is trained; if not, trigger model retraining
     if not model_trained:
         print("Model is not trained. Training now...")
-        load_data()
-
-        # Prepare training and validation datasets
-        train_dataset = dataset_preparer.prepare_tf_dataset(RecommendationCache.preprocessed_data,
-                                                            RecommendationCache.mapping_layer)
-        test_dataset = train_dataset  # For simplicity, using the same dataset for validation
-
-        # Initialize and train a new model
-        num_users = len(RecommendationCache.preprocessed_data['player_id'].unique())
-        num_games = len(RecommendationCache.preprocessed_data['game_id'].unique())
-        embedding_dim = 512
-        siamese_model = SiameseRecommendationModel(num_users=num_users, num_games=num_games, embedding_dim=embedding_dim)
-        model_trainer = ModelTrainer(model=siamese_model, learning_rate=0.001, batch_size=128, epochs=65)
-        history = model_trainer.train_model(train_dataset, test_dataset)
-
-        # Update the recommendation system with the new model
-        RecommendationCache.recommendation_system = RecommendationSystem(
-            model=siamese_model,
-            dataset_preparer=dataset_preparer,
-            mapping_layer=RecommendationCache.mapping_layer
-        )
+        initialize_recommendation_system()
         
-        print("Model retrained and recommendation system updated.")
-        model_trained = True  # Mark the model as trained
-
-    return RecommendationCache.recommendation_system.recommend_top_users(
-        RecommendationCache.preprocessed_data,
+    return recommendation_cache.recommendation_system.recommend_top_users(
+        recommendation_cache.preprocessed_data,
         request.game_id,
         request.user_id,
         request.offset,
@@ -140,8 +159,24 @@ def compute_recommendations(request):
         filters=request.filters
     )
 
-def attach_usernames(top_users):
-    """Adds a `username` field to each user in the recommendation list using their user ID."""
-    from database import get_username  # Avoiding circular import by importing within function
+def attach_usernames(top_users, user_map):
+    """Adds `username` field to recommended users using the provided user mapping."""
+    
     for user in top_users["recommended_users"]:
-        user["username"] = get_username(user["user_id"])
+        user["username"] = user_map.get(user["user_id"], None)
+        
+def get_user_id_to_username_mapping(user_ids):
+    """Fetches usernames in bulk for given user IDs and returns a mapping."""
+    
+    if not user_ids:
+        return {}
+
+    user_data = fetch_all_users_data(
+        table="user",
+        database_name="crewdb", 
+        columns=["id", "full_name"],
+        conditions=[{"field": "id", "operator": "IN", "value": tuple(user_ids)}]
+    )
+
+    # Create and return mapping {user_id: username}
+    return {user["id"]: user["full_name"] for user in user_data}

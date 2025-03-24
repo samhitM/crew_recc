@@ -1,6 +1,19 @@
-from database.connection import get_db_connection
+from database.connection import get_db_connection, release_db_connection
 from psycopg2 import sql
 from typing import List, Dict, Optional, Any
+from fastapi import HTTPException
+
+def fetch_from_db(query, params=None, database_name="crewdb"):
+    """Executes a query using a connection from the pool."""
+    conn = get_db_connection(database_name)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, params or ())
+            return cur.fetchall()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    finally:
+        release_db_connection(conn, database_name)
 
 def fetch_all_users_data(
     table: str,

@@ -1,36 +1,31 @@
 from database.connection import get_db_connection
 from fastapi import HTTPException
+from database.queries import fetch_from_db
 
-def get_interaction_type(user_id, player_ids):
-    """
-    Batch fetches interactions for a list of player_ids.
-    """
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            query = """
-                SELECT user_id, entity_id_primary, interaction_type, action, metadata, create_ts
-                FROM user_interactions
-                WHERE (user_id = %s AND entity_id_primary = ANY(%s) AND entity_primary = 'USER')
-                   OR (entity_id_primary = %s AND user_id = ANY(%s) AND entity_primary = 'USER')
-                ORDER BY create_ts DESC;
-            """
-            cur.execute(query, (user_id, player_ids, user_id, player_ids))
-            results = cur.fetchall()
+def get_interaction_type(user_id, player_ids, database_name="crewdb"):
+    """Batch fetches interactions for a list of player_ids."""
+    if not player_ids:
+        return {}
 
-            interaction_map = {}
-            for result in results:
-                interaction_map[result[1]] = {
-                    "interactionType": result[2],
-                    "action": result[3],
-                    "metadata": result[4],
-                    "createTimestamp": result[5],
-                }
-            return interaction_map
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching interactions: {str(e)}")
-    finally:
-        conn.close()
+    query = """
+        SELECT user_id, entity_id_primary, interaction_type, action, metadata, create_ts
+        FROM user_interactions
+        WHERE (user_id = %s AND entity_id_primary = ANY(%s) AND entity_primary = 'USER')
+           OR (entity_id_primary = %s AND user_id = ANY(%s) AND entity_primary = 'USER')
+        ORDER BY create_ts DESC;
+    """
+    results = fetch_from_db(query, (user_id, player_ids, user_id, player_ids), database_name)
+
+    interaction_map = {
+        entity_id: {
+            "interactionType": interaction_type,
+            "action": action,
+            "metadata": metadata,
+            "createTimestamp": create_ts,
+        }
+        for _, entity_id, interaction_type, action, metadata, create_ts in results
+    }
+    return interaction_map
 
         
 # def fetch_user_interactions(user_id: str):

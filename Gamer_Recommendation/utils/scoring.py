@@ -1,33 +1,45 @@
 from datetime import datetime
+import numpy as np
+import pandas as pd
 
 class ScoreAdjuster:
     @staticmethod
-    def adjust_score(row, interaction_map, relationships):
+    def adjust_scores(df, interaction_map, relationships):
         """
         Adjusts the recommendation score based on user interactions and relationships.
 
         Parameters:
-            row (pd.Series): A row of the DataFrame containing user data, including 'player_id' and 'score'.
+            df (pd.DataFrame): A DataFrame containing user data, including 'player_id' and 'score'.
             interaction_map (dict): Maps user IDs to their last interaction details.
             relationships (dict): Dictionary containing sets of related users (e.g., "friends").
 
         Returns:
-            float: The adjusted score.
+            pd.DataFrame: The DataFrame with adjusted scores.
         """
+        scores = df['score'].values
+        # Interaction-based adjustments
+        interactions = df['player_id'].map(interaction_map).apply(lambda x: x if isinstance(x, dict) else {})  # Ensure valid dict
+        profile_interaction_mask = interactions.apply(lambda x: x.get('interactionType') == "PROFILE_INTERACTION")
+        friend_request_mask = profile_interaction_mask & interactions.apply(lambda x: x.get('action') == "friend_request")
+        ignored_mask = profile_interaction_mask & interactions.apply(lambda x: x.get('action') == "ignored")
     
-        score = row['score']
-        interaction = interaction_map.get(row['player_id'])
+        # Apply friend request penalty
+        scores[friend_request_mask] *= 0.5
 
-        if interaction:
-            if interaction['interactionType'] == "PROFILE_INTERACTION" and interaction['action'] == "friend_request":
-                score *= 0.5
-            elif interaction['interactionType'] == "PROFILE_INTERACTION" and interaction['action'] == "ignored":
-                time_elapsed = (datetime.now() - interaction['createTimestamp']).days
-                decay_factor = max(0, 1 - time_elapsed / 30)
-                score *= decay_factor
+        # Apply decay factor for ignored users
+        ignored_indices = ignored_mask[ignored_mask].index
+        if len(ignored_indices) > 0:
+            time_elapsed = np.array([
+                (datetime.now() - interaction_map[player_id]['createTimestamp']).days
+                if 'createTimestamp' in interaction_map.get(player_id, {}) else 30
+                for player_id in df.loc[ignored_indices, 'player_id']
+            ])
+            decay_factors = np.maximum(0, 1 - time_elapsed / 30)
+            scores[ignored_indices] *= decay_factors
 
-        # Adjust score for friends
-        if row['player_id'] in relationships.get("friends", []):
-            score *= 0.8
-        
-        return score
+        # Friend-based adjustments
+        friend_mask = df['player_id'].isin(relationships.get("friends", set()))
+        scores[friend_mask] *= 0.8
+
+        df['score'] = scores
+        return df

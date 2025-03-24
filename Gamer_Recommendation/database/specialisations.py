@@ -1,7 +1,8 @@
 from fastapi import HTTPException
 from database.connection import get_db_connection
+from database.queries import fetch_from_db
 
-def get_specialisations(player_ids):
+def get_specialisations(player_ids, database_name="crewdb"):
     """
     Batch fetches specialisations for a list of player_ids.
 
@@ -11,20 +12,14 @@ def get_specialisations(player_ids):
     Returns:
         dict: A mapping of player IDs to their specialisations.
     """
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            query = """
-                SELECT user_id, specialisation
-                FROM crew_user
-                WHERE user_id = ANY(%s);
-            """
-            cur.execute(query, (player_ids,))
-            results = cur.fetchall()
+    if not player_ids:
+        return {}
+    
+    query = """
+        SELECT user_id, specialisation
+        FROM crew_user
+        WHERE user_id = ANY(%s);
+    """
+    results = fetch_from_db(query, (player_ids,), database_name)
 
-            specializations_map = {result[0]: result[1] if result[1] else [] for result in results}
-            return specializations_map
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching specialisations: {str(e)}")
-    finally:
-        conn.close()
+    return {user_id: specialisation if specialisation else [] for user_id, specialisation in results}
