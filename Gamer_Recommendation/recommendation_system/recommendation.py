@@ -9,7 +9,9 @@ from utils import ScoreAdjuster
 from utils import APIClient
 from utils import LossPlotter
 from utils import ModelTrainer
-import time
+from database import init_db_pools
+
+
 
 # Import custom modules from the respective directories
 from data_preprocessing import DataLoader
@@ -39,6 +41,7 @@ class RecommendationSystem:
             user_age = df[df['player_id'] == user_id]['age']
             if user_age.empty:
                 self._empty_response(game_id, user_id, offset)
+                
             user_dob = user_age.values[0]
             
             all_specializations = get_specialisations(df['player_id'].tolist())
@@ -116,6 +119,8 @@ class RecommendationSystem:
 
 if __name__ == "__main__":
     # Load your data and initialize the model, dataset preparer, and mapping layer here
+    init_db_pools()
+    
     data_loader = DataLoader('../Datasets/request.json')
     raw_data = data_loader.load_data()
 
@@ -134,7 +139,7 @@ if __name__ == "__main__":
     vae_model = None  # Replace with the actual VAE model (Will integrate in the second version)
     dataset_preparer = DatasetPreparer()
 
-    model_trainer = ModelTrainer(model=siamese_model, learning_rate=0.001, batch_size=128, epochs=65)
+    model_trainer = ModelTrainer(model=siamese_model, learning_rate=0.001, batch_size=128, epochs=15)
     train_dataset = dataset_preparer.prepare_tf_dataset(preprocessed_data, mapping_layer)
     test_dataset = train_dataset  # Replace with actual test dataset
     history = model_trainer.train_model(train_dataset, test_dataset)
@@ -148,15 +153,15 @@ if __name__ == "__main__":
 
     
     game_id= 578080
-    user_id= "dCUKB2Vf9Zk"
+    user_id= "8qqQdeMC3s5"
     offset=10
     num_recommendations=10
     filters= {
         "recommendation_expertise": "beginner",
         "recommendation_specialisation": "Strategy",
         "country": "India",
-        "user_interests": ["Action", "MOBA", "Strategy", "Indie", "RPG", "New Interest 1"],
-        "age_delta": 7
+        "user_interests": ["Action", "MOBA", "Strategy", "Indie", "RPG"],
+        "age_delta": 35
     }
     
 
