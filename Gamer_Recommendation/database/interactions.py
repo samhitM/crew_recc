@@ -1,59 +1,40 @@
 from database.connection import get_db_connection
 from fastapi import HTTPException
+from database.queries import fetch_from_db
 
-def get_interaction_type(user_id, player_ids):
+def get_interaction_type(user_id, player_ids, database_name="crewdb"):
+    """Fetches the latest 'friend_request' and 'ignored' interactions separately for each player_id."""
+    if not player_ids:
+        return {}
+
+    query = """
+        SELECT user_id, entity_id_primary, interaction_type, action, metadata, create_ts
+        FROM user_interactions
+        WHERE (user_id = %s AND entity_id_primary = ANY(%s) AND entity_primary = 'USER')
+           OR (entity_id_primary = %s AND user_id = ANY(%s) AND entity_primary = 'USER')
+        ORDER BY create_ts DESC;
     """
-    Batch fetches interactions for a list of player_ids.
-    """
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            query = """
-                SELECT user_id, entity_id_primary, interaction_type, action, metadata, create_ts
-                FROM user_interactions
-                WHERE (user_id = %s AND entity_id_primary = ANY(%s) AND entity_primary = 'USER')
-                   OR (entity_id_primary = %s AND user_id = ANY(%s) AND entity_primary = 'USER')
-                ORDER BY create_ts DESC;
-            """
-            cur.execute(query, (user_id, player_ids, user_id, player_ids))
-            results = cur.fetchall()
+    results = fetch_from_db(query, (user_id, player_ids, user_id, player_ids), database_name)
 
-            interaction_map = {}
-            for result in results:
-                interaction_map[result[1]] = {
-                    "interactionType": result[2],
-                    "action": result[3],
-                    "metadata": result[4],
-                    "createTimestamp": result[5],
-                }
-            return interaction_map
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching interactions: {str(e)}")
-    finally:
-        conn.close()
+    interaction_map = {}
 
-        
-# def fetch_user_interactions(user_id: str):
-#     """
-#     Fetches distinct users who have interacted with the given user.
-    
-#     Parameters:
-#         user_id (str): The ID of the user.
-    
-#     Returns:
-#         list: A list of user IDs who interacted with the given user.
-#     """
-#     conn = get_db_connection()
-#     try:
-#         with conn.cursor() as cur:
-#             query = """
-#                 SELECT DISTINCT user_id FROM user_interactions
-#                 WHERE entity_id_primary = %s AND entity_primary = 'USER'
-#             """
-#             cur.execute(query, (user_id,))
-#             return [row[0] for row in cur.fetchall()]
-#     except Exception as e:
-#         print(f"Error fetching user interactions for {user_id}: {e}")
-#         return []
-#     finally:
-#         conn.close()
+    for _, entity_id, interaction_type, action, metadata, create_ts in results:
+        if entity_id not in interaction_map:
+            interaction_map[entity_id] = {}
+
+        # Store the latest "ignored" and "friend_request" separately
+        if action == "ignored" and "ignored" not in interaction_map[entity_id] and interaction_type == 'SWIPE':
+            interaction_map[entity_id]["ignored"] = {
+                "interactionType": interaction_type,
+                "metadata": metadata,
+                "createTimestamp": create_ts,
+            }
+
+        elif action == "friend_request" and "friend_request" not in interaction_map[entity_id] and (interaction_type == 'SWIPE' or interaction_type == 'PROFILE_INTERACTION'):
+            interaction_map[entity_id]["friend_request"] = {
+                "interactionType": interaction_type,
+                "metadata": metadata,
+                "createTimestamp": create_ts,
+            }
+
+    return interaction_map

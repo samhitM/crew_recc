@@ -1,9 +1,14 @@
 class RecommendationCache:
-    """Cache class to store preprocessed data, mapping layer, and recommendation system for quick access."""
-    def __init__(self):
-        self.preprocessed_data = None
-        self.mapping_layer = None
-        self.recommendation_system = None
+    """Singleton class to store preprocessed data, mapping layer, and recommendation system."""
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(RecommendationCache, cls).__new__(cls)
+            cls._instance.preprocessed_data = None
+            cls._instance.mapping_layer = None
+            cls._instance.recommendation_system = None
+        return cls._instance
 
     def reset_cache(self):
         """Clears all cache components."""
@@ -23,5 +28,5 @@ class RecommendationCache:
         """Updates the mapping layer in the cache."""
         self.mapping_layer = new_mapping_layer
 
-# Instantiate the cache object
+# Use this shared instance everywhere
 recommendation_cache = RecommendationCache()

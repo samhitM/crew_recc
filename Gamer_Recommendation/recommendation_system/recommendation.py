@@ -9,6 +9,9 @@ from utils import ScoreAdjuster
 from utils import APIClient
 from utils import LossPlotter
 from utils import ModelTrainer
+from database import init_db_pools
+
+
 
 # Import custom modules from the respective directories
 from data_preprocessing import DataLoader
@@ -18,39 +21,27 @@ from data_preprocessing import DatasetPreparer
 from models import SiameseRecommendationModel
 from core.config import API_BASE_URL
 
-
 class RecommendationSystem:
     def __init__(self, model, dataset_preparer, mapping_layer):
         self.model = model
         self.dataset_preparer = dataset_preparer
         self.mapping_layer = mapping_layer
+        
+    def _empty_response(self, game_id, user_id, offset):
+        return {
+            "game_id": int(game_id),
+            "user_id":  str(user_id),
+            "offset": int(offset),
+            "user_specialization": [],
+            "recommended_users": []
+        }
 
     def recommend_top_users(self, df, game_id, user_id, offset, num_recommendations=20, filters=None):
-        """
-        Generates a list of recommended users based on various filters and a predictive model.
-
-        Parameters:
-            df (DataFrame): User dataset containing player information.
-            game_id (int): The ID of the game for which recommendations are generated.
-            user_id (str): The ID of the requesting user.
-            offset (int): The starting index for recommendations (used for pagination).
-            num_recommendations (int, optional): The number of users to recommend (default: 20).
-            filters (dict, optional): Additional filtering criteria such as country, expertise, and interests.
-
-        Returns:
-            dict: A dictionary containing the game ID, user ID, and a list of recommended users.
-        """
-        
         try:
             user_age = df[df['player_id'] == user_id]['age']
             if user_age.empty:
-                return {
-                    "game_id": game_id,
-                    "user_id": user_id,
-                    "offset": offset,
-                    "user_specialization": [],
-                    "recommended_users": []
-                }
+                self._empty_response(game_id, user_id, offset)
+                
             user_dob = user_age.values[0]
             
             all_specializations = get_specialisations(df['player_id'].tolist())
@@ -67,71 +58,41 @@ class RecommendationSystem:
                     filters.get('age_delta', 12)
                 )
             if df.empty:
-                return {
-                    "game_id": game_id,
-                    "user_id": user_id,
-                    "offset": offset,
-                    "user_specialization": [],
-                    "recommended_users": []
-                }
-                 
+                self._empty_response(game_id, user_id, offset)
+            api_client = APIClient(API_BASE_URL, user_id)
             
-            api_client = APIClient(API_BASE_URL,user_id)
-            
-            # Fetch user relationships in a single batch
             relationships = {
                 "friends": set(relation['player_id'] for relation in api_client.fetch_user_relations(limit=50, offset=0, relation="friends")),
                 "blocked": set(relation['player_id'] for relation in api_client.fetch_user_relations(limit=50, offset=0, relation="blocked_list")),
                 "reported": set(relation['player_id'] for relation in api_client.fetch_user_relations(limit=50, offset=0, relation="report_list"))
             }
-            
-            # Exclude blocked and reported users early
+
             df = df[~df['player_id'].isin(relationships["blocked"] | relationships["reported"])]
             if df.empty:
-               return {
-                    "game_id": game_id,
-                    "user_id": user_id,
-                    "offset": offset,
-                    "user_specialization": [],
-                    "recommended_users": []
-                }
-            
-            
-            # Map game_id and user_id to indices
+               self._empty_response(game_id, user_id, offset)
+
             game_idx = self.mapping_layer.map_game_id(game_id)
             user_idx = self.mapping_layer.map_user_id(user_id)
             if game_idx is None or user_idx is None:
                 raise ValueError("Invalid game_id or user_id mapping.")
 
-            # Prepare inputs for model prediction
             user_input_indices = df['player_id'].map(self.mapping_layer.user_id_mapping).values.astype(np.int32)
             game_input = np.full(len(user_input_indices), game_idx, dtype=np.int32)
 
-            # Extract features and predict scores
             (_, _, game_features, global_features), _ = self.dataset_preparer.create_input_tensors(df, self.mapping_layer)
             inputs = (user_input_indices, game_input, game_features, global_features)
             scores = self.model.predict(inputs)
 
-            # Aggregate scores using original player IDs
             df['score'] = scores
             min_score = df['score'].min()
             if min_score < 0:
-                df['score'] -= min_score  # Normalize scores to non-negative
+                df['score'] -= min_score
 
+            interaction_map = get_interaction_type(user_id, df['player_id'].tolist())
+            df = ScoreAdjuster.adjust_scores(df, interaction_map, relationships)
 
-            # Pre-fetch interactions and specializations for optimization
-            player_ids = df['player_id'].tolist()
-            interaction_map = get_interaction_type(user_id, player_ids)
-            specializations_map = get_specialisations(player_ids)
-
-            # Adjust scores for interactions
-            df['score'] = df.apply(lambda row: ScoreAdjuster.adjust_score(row, interaction_map, relationships), axis=1)
-
-            # Exclude the requesting user and sort by score
             df = df[df['player_id'] != user_id]
             top_users = df.nlargest(num_recommendations, 'score')
-
-            # Prepare detailed response
             recommended_users = [
                 {
                     "user_id": row['player_id'],
@@ -139,13 +100,12 @@ class RecommendationSystem:
                     "age": int(row['age']),
                     "recommendation_expertise": row['recommendation_expertise'],
                     "interests": row['user_interests'],
-                    "recommendation_specialization": specializations_map.get(row['player_id'], [])
+                    "recommendation_specialization": all_specializations.get(row['player_id'], [])
                 }
                 for _, row in top_users.iterrows()
             ]
 
-            # Final response
-            response = {
+            return {
                 "game_id": int(game_id),
                 "user_id": str(user_id),
                 "offset": int(offset),
@@ -153,14 +113,14 @@ class RecommendationSystem:
                 "recommended_users": recommended_users,
             }
 
-            return response
-
         except Exception as e:
             raise ValueError(f"An error occurred while generating recommendations: {str(e)}")
 
 
 if __name__ == "__main__":
     # Load your data and initialize the model, dataset preparer, and mapping layer here
+    init_db_pools()
+    
     data_loader = DataLoader('../Datasets/request.json')
     raw_data = data_loader.load_data()
 
@@ -179,7 +139,7 @@ if __name__ == "__main__":
     vae_model = None  # Replace with the actual VAE model (Will integrate in the second version)
     dataset_preparer = DatasetPreparer()
 
-    model_trainer = ModelTrainer(model=siamese_model, learning_rate=0.001, batch_size=128, epochs=65)
+    model_trainer = ModelTrainer(model=siamese_model, learning_rate=0.001, batch_size=128, epochs=15)
     train_dataset = dataset_preparer.prepare_tf_dataset(preprocessed_data, mapping_layer)
     test_dataset = train_dataset  # Replace with actual test dataset
     history = model_trainer.train_model(train_dataset, test_dataset)
@@ -193,15 +153,15 @@ if __name__ == "__main__":
 
     
     game_id= 578080
-    user_id= "dCUKB2Vf9Zk"
+    user_id= "8qqQdeMC3s5"
     offset=10
     num_recommendations=10
     filters= {
         "recommendation_expertise": "beginner",
         "recommendation_specialisation": "Strategy",
         "country": "India",
-        "user_interests": ["Action", "MOBA", "Strategy", "Indie", "RPG", "New Interest 1"],
-        "age_delta": 7
+        "user_interests": ["Action", "MOBA", "Strategy", "Indie", "RPG"],
+        "age_delta": 35
     }
     
 
