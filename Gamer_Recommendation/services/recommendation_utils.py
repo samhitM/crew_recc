@@ -123,9 +123,6 @@ def periodic_model_training():
         except Exception as e:
             print(f"Error during model training: {e}")
 
-# Start periodic model training in a separate thread
-threading.Thread(target=periodic_model_training, daemon=True).start()
-
 def compute_recommendations(request):
     """
     Generates a list of recommended users based on the input game and user details.

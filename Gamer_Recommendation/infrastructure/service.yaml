@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: recommendation-dev-private-service
+  namespace: default
+spec:
+  clusterIP: 10.0.3.49
+  clusterIPs:
+    - 10.0.3.49
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+    - port: 80
+      protocol: TCP
+      targetPort: 8000
+  selector:
+    app: crew-recommendation-service
+  sessionAffinity: None
+  type: ClusterIP
