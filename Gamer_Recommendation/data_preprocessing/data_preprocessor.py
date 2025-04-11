@@ -59,7 +59,7 @@ class DataPreprocessor:
         # Extract and process player-level data
         player_id = player_data['userId']
         endpoint_data = player_data['endpoint_data']['endpointData']
-        games = endpoint_data['games']
+        games = endpoint_data.get('games', None)
         player_summary = endpoint_data.get('playerSummary', {})
         dob = player_summary.get('dob', None)
         age = self.calculate_age(dob) if dob else None
@@ -73,30 +73,31 @@ class DataPreprocessor:
         games_played = set()
 
         for game in games:
-            playtime_forever = game['playtime_forever']
-            genres = [g['description'] for g in game['details']['genres']]
+            playtime_forever = game.get('playtime_forever', 0)
+            details = game.get('details') or {}
+            genres = [g.get('description', '') for g in details.get('genres', [])]
 
             total_playtime_across_games += playtime_forever
 
             for genre in genres:
                 genre_playtime_dict[genre] = genre_playtime_dict.get(genre, 0) + playtime_forever
 
-            games_played.add(game['appid'])
+            games_played.add(game.get('appid'))
         
         return player_id, games, total_playtime_across_games, genre_playtime_dict, games_played, age, recommendation_expertise, country, user_interests
 
     def process_game(self, player_id, game):
-        # Extract and process game-level data
+        
         game_id = game['appid']
         game_name = game['name']
-        playtime_forever = game['playtime_forever']
-        achievements_unlocked = sum([ach['achieved'] for ach in game['achievements']])
-        num_sessions = len(game['achievements'])
+        playtime_forever = game.get('playtime_forever', 0)
+        achievements_unlocked = sum([ach.get('achieved', 0) for ach in game.get('achievements', [])])
+        num_sessions = len(game.get('achievements', []))
 
-        # Extract genres, platforms, and mediums for the game
-        genres = [g['description'] for g in game['details']['genres']]
-        platforms = [platform for platform, supported in game['details']['platforms'].items() if supported]
-        mediums = [cat['description'] for cat in game['details']['categories']]
+        details = game.get('details') or {}
+        genres = [g.get('description', '') for g in details.get('genres', [])]
+        platforms = [platform for platform, supported in details.get('platforms', {}).items() if supported]
+        mediums = [cat.get('description', '') for cat in details.get('categories', [])]
         last_played = game.get('rtime_last_played', 0)
         
         return {
@@ -109,7 +110,7 @@ class DataPreprocessor:
             'genres': genres,
             'platforms': platforms,
             'medium': mediums,
-            'last_played': last_played  
+            'last_played': last_played
         }, genres, platforms, mediums
 
     def add_global_features(self, df_list, player_id, total_playtime_across_games, genre_playtime_dict, genre_set, game_diversity):

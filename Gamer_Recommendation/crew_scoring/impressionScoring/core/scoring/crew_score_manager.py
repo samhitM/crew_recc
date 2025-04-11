@@ -1,6 +1,7 @@
 import networkx as nx
-from impressionScoring.utils import DataFetcher
+from crew_scoring.impressionScoring.utils import DataFetcher
 from sklearn.preprocessing import MinMaxScaler
+from services.recommendation_utils import get_user_id_to_username_mapping
 import numpy as np
 
 class CrewScoreManager:
@@ -21,51 +22,41 @@ class CrewScoreManager:
         self.graph = None  # Initialize the graph lazily
         self.user_ids = user_ids
         self.data_fetcher = DataFetcher(api_url=api_url, user_ids=user_ids)
+        self.user_id_to_username = get_user_id_to_username_mapping(self.user_ids, name_field="username") # Get mapping of user_id to username
+
 
     def build_graph(self):
         """
-        Build a graph based on user relations fetched from the API.
+        Build a full graph by fetching relations for all users in self.user_ids.
 
         Returns:
-            nx.Graph: A graph representing user relations.
+            nx.Graph: A graph representing user relations using usernames.
         """
         if self.graph is not None:
-            return self.graph  # Skip if already built
+            return self.graph  # Already built
 
         self.graph = nx.Graph()
-        visited_users = set()
-        user_queue = []
-
         try:
-            # Fetch initial user relations
-            initial_relations = self.data_fetcher.fetch_user_relations()
-            for user in initial_relations:
-                user_id = user["user_id"]
-                self.graph.add_node(user_id)
-                user_queue.append(user_id)
+            for user_id in self.user_ids:
+                # Fetch all friends of this user
+                relations = self.data_fetcher.fetch_user_relations(user_id=user_id)
+                username = self.user_id_to_username.get(user_id, user_id)
 
-            while user_queue:
-                current_user = user_queue.pop(0)
-                if current_user in visited_users:
-                    continue
+                self.graph.add_node(username)
 
-                visited_users.add(current_user)
-
-                # Fetch friends of the current user
-                relations = self.data_fetcher.fetch_user_relations(user_id=current_user)
                 for relation in relations:
-                    friend_id = relation["user_id"]
-                    self.graph.add_node(friend_id)
-                    self.graph.add_edge(current_user, friend_id)
-
-                    if friend_id not in visited_users:
-                        user_queue.append(friend_id)
+                    friend_username = relation.get("username")  # use username directly from relation
+                    if friend_username:
+                        self.graph.add_node(friend_username)
+                        self.graph.add_edge(username, friend_username)
 
         except Exception as e:
             raise RuntimeError(f"Failed to build graph: {e}")
-
+        
+        # print("Nodes:", list(self.graph.nodes))
+        # print("Edges:", list(self.graph.edges))
         return self.graph
-
+    
     def calculate_k_shell(self):
         """
         Calculate the K-shell decomposition for the graph.
@@ -75,6 +66,7 @@ class CrewScoreManager:
         """
         if self.graph is None:
             raise ValueError("Graph is empty. Build the graph first.")
+        self.graph.remove_edges_from(nx.selfloop_edges(self.graph))
         return nx.core_number(self.graph)
 
     def _normalize_features(self, all_users_data):
@@ -130,7 +122,7 @@ class CrewScoreManager:
             
             # Update each user's data with K-shell value
             for user_id, data in all_user_data.items():
-                data["K_Shell"] = k_shell_values.get(user_id, 0)
+                data["K_Shell"] = k_shell_values.get(self.user_id_to_username.get(user_id), 0)
             
             # Normalize features
             all_user_data = self._normalize_features(all_user_data)

@@ -165,8 +165,16 @@ def attach_usernames(top_users, user_map):
     for user in top_users["recommended_users"]:
         user["username"] = user_map.get(user["user_id"], None)
         
-def get_user_id_to_username_mapping(user_ids):
-    """Fetches usernames in bulk for given user IDs and returns a mapping."""
+def get_user_id_to_username_mapping(user_ids, name_field="full_name"):
+    """Fetches user names in bulk for given user IDs and returns a mapping.
+
+    Args:
+        user_ids (list): List of user IDs.
+        name_field (str): Field to use for name mapping, either 'full_name' or 'username'.
+
+    Returns:
+        dict: Mapping from user_id to specified name field.
+    """
     
     if not user_ids:
         return {}
@@ -174,9 +182,8 @@ def get_user_id_to_username_mapping(user_ids):
     user_data = fetch_all_users_data(
         table="user",
         database_name="crewdb", 
-        columns=["id", "full_name"],
+        columns=["id", name_field],
         conditions=[{"field": "id", "operator": "IN", "value": tuple(user_ids)}]
     )
 
-    # Create and return mapping {user_id: username}
-    return {user["id"]: user["full_name"] for user in user_data}
+    return {user["id"]: user[name_field] for user in user_data}

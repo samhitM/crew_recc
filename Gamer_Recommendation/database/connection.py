@@ -33,6 +33,7 @@ def init_db_pools():
 
 def get_db_connection(database_name="crewdb"):
     """Fetches a connection from the connection pool."""
+    init_db_pools()
     if database_name not in db_pools:
         raise HTTPException(status_code=500, detail=f"Database {database_name} not configured")
 

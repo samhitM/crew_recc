@@ -3,10 +3,13 @@ from pydantic import BaseModel
 from typing import Optional
 from core.config import CREW_USER_ID
 from services.token_utils import validate_token
-from services.recommendation_utils import load_data, compute_recommendations, attach_usernames, get_user_id_to_username_mapping, initialize_recommendation_system
+from services.recommendation_utils import load_data, compute_recommendations, attach_usernames, get_user_id_to_username_mapping, initialize_recommendation_system, periodic_model_training
 from database import get_username, init_db_pools
 from cache.recommendation_cache import recommendation_cache
 from services.token_utils import generate_jwt_token
+from crew_scoring.impressionScoring.cron.periodic_updater import periodic_crew_impression_update
+
+import threading
 
 app = FastAPI()
 
@@ -17,6 +20,8 @@ def startup_event():
     init_db_pools()
     """ Initialize recommendation system at startup """
     initialize_recommendation_system()
+    threading.Thread(target=periodic_crew_impression_update, daemon=True).start()  # Start background crew impression updater
+    threading.Thread(target=periodic_model_training, daemon=True).start() # Start periodic model retraining
 
 # Recommendation request schema
 class RecommendationRequest(BaseModel):
