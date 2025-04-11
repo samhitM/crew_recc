@@ -4,7 +4,7 @@ from typing import Optional
 from core.config import CREW_USER_ID
 from services.token_utils import validate_token
 from services.recommendation_utils import load_data, compute_recommendations, attach_usernames, get_user_id_to_username_mapping, initialize_recommendation_system, periodic_model_training
-from database import get_username, init_db_pools
+from database.connection import init_db_pools, db_pools
 from cache.recommendation_cache import recommendation_cache
 from services.token_utils import generate_jwt_token
 from crew_scoring.impressionScoring.cron.periodic_updater import periodic_crew_impression_update
