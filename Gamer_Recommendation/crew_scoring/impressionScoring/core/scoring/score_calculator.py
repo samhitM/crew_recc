@@ -1,4 +1,4 @@
-from impressionScoring.config.constants import *
+from crew_scoring.impressionScoring.config.constants import *
 
 
 class CrewScoreCalculator:
@@ -46,7 +46,7 @@ class CrewScoreCalculator:
         Returns:
             float: The calculated total score.
         """
-        return BETA * topological_score + GAMMA * user_feature_score + (1 - BETA - GAMMA) * website_impressions + bonus
+        return BETA * topological_score + GAMMA * user_feature_score + ALPHA * website_impressions + (1 - ALPHA - BETA - GAMMA) * bonus
 
     def get_user_scores(self, all_user_data):
         """
@@ -69,9 +69,16 @@ class CrewScoreCalculator:
             topological_score = self.calculate_topological_score(user_data)
             user_feature_score = self.calculate_user_feature_score(user_data)
             website_impressions = user_data['Unique_Pageviews'] * (1 + user_data['Scroll_Depth_Percent'] / 100)
+            
+            # Scale and round individual scores
+            topological_score = round(topological_score * 100)
+            user_feature_score = round(user_feature_score * 100)
+            website_impressions = round(website_impressions * 100)
+
             total_score = self.calculate_total_score(
-                topological_score, user_feature_score, website_impressions, bonus=user_data['Bonus']
+                topological_score / 100, user_feature_score / 100, website_impressions / 100, bonus=user_data['Bonus']
             )
+            total_score = round(total_score * 100)
 
             # Add calculated scores to the user data
             updated_user_data[user_id] = {

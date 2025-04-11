@@ -13,8 +13,9 @@ FEATURES = [
 # Missing : Reposts, Interest_Topic, Posts_on_Topic
 
 # Weight parameters for total score calculation
-BETA = 0.5
-GAMMA = 0.3
+BETA = 0.3
+GAMMA = 0.2
+ALPHA = 0.4
 
 # Default bonus value
 DEFAULT_BONUS = 0

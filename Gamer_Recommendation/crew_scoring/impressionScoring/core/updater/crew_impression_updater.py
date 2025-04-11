@@ -1,4 +1,4 @@
-from impressionScoring.config.update_config import UpdateConfig
+from crew_scoring.impressionScoring.config.update_config import UpdateConfig
 from typing import List, Dict, Any
 from database import perform_table_updates
 

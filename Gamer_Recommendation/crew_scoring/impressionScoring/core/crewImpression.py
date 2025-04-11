@@ -11,12 +11,10 @@ from core.config import API_BASE_URL
 
 if __name__ == "__main__":
     api_url = API_BASE_URL
-    user_ids = fetch_all_user_ids()[:2]
+    user_ids = fetch_all_user_ids()
 
     manager = CrewScoreManager(api_url=api_url,user_ids=user_ids)
     all_user_data = manager.fetch_complete_user_data()
-    print("All_users_data")
-    print(all_user_data)
     
     crew_score_calculator = CrewScoreCalculator()
 
@@ -40,7 +38,7 @@ if __name__ == "__main__":
             "Timestamp": "2024-07-25 11:15:00"
         })
     
-    print(aggregates)
+    # print(aggregates)
     
     crew_updater = CrewImpressionUpdater()
     crew_updater.update_crew_impressions(updates=updates)
@@ -50,7 +48,7 @@ if __name__ == "__main__":
     aggregator=Aggregator()
     aggregated_data = aggregator.aggregate_impressions(aggregates)
     print("Aggregated Impressions:")
-    print(aggregated_data)
+    # print(aggregated_data)
 
    # Create a Plotter instance
     plotter = Plotter()

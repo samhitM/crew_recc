@@ -2,6 +2,7 @@ import requests
 import warnings
 import os
 import sys
+import math
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 
@@ -12,8 +13,8 @@ from database import (
     fetch_all_users_data, 
 )
 from typing import List, Dict, Optional
-from impressionScoring.config.constants import DEFAULT_VALUES
-from impressionScoring.config.query_config import QueryConfig
+from crew_scoring.impressionScoring.config.constants import DEFAULT_VALUES
+from crew_scoring.impressionScoring.config.query_config import QueryConfig
 from datetime import datetime
 from services.token_utils import generate_jwt_token
 
@@ -57,21 +58,34 @@ class DataFetcher:
     def _fetch_profile_details(self) -> Dict[str, Dict[str, float]]:
         """Fetch profile details for multiple users from API."""
         
-        url = f"{self.api_url}/profile-details"
+        url = f"{self.api_url}/api/profile-details"
         profile_data = self.initialize_default_user_data()
+        max_timestamp = int(datetime.now().timestamp())  # Current time as ceiling for inversion
 
         for user_id in self.user_ids:
-            response = self._make_request(url,user_id,params={"user_id": user_id})
+            response = self._make_request(url, user_id, params={"user_id": user_id})
             if response:
+                register_ts = response.get("register_ts")
+                if register_ts:
+                    try:
+                        reg_time = datetime.strptime(register_ts[:-1], "%Y-%m-%dT%H:%M:%S.%f")
+                        bonus = max_timestamp - int(reg_time.timestamp())
+                    except Exception:
+                        bonus = DEFAULT_VALUES["Bonus"]
+                else:
+                    bonus = DEFAULT_VALUES["Bonus"]
+                
+                desc = response.get("description")
+                bio_content = 1 if isinstance(desc, str) and desc.strip() else DEFAULT_VALUES["Bio_Content"]
+
                 profile_data[user_id].update({
                     "Out_Degree": response.get("total_friends", DEFAULT_VALUES["Out_Degree"]),
-                    "Bio_Content": 1 if response.get("description") else DEFAULT_VALUES["Bio_Content"],
+                    "Bio_Content": bio_content,
                     "User_Games": response.get("total_games", DEFAULT_VALUES["User_Games"]),
-                    "Bonus" : int(datetime.strptime(response.get("register_ts", DEFAULT_VALUES["Bonus"])[:-1], "%Y-%m-%dT%H:%M:%S.%f").timestamp())
+                    "Bonus": bonus
                 })
-
         return profile_data
-
+        
     def _fetch_user_tiers(self) -> Dict[str, float]:
         """
         Fetches user tiers and assigns a tier value based on their status.
@@ -147,13 +161,13 @@ class DataFetcher:
             group_by=query_config.get('group_by', None)
         )
         favorites_dict = {item["user_id"]: item["Favorites"] for item in favorites_data if item["user_id"] is not None}
-
+        
         # Populate user metrics for each user
         for user_id in self.user_ids:
             user_metrics_data[user_id]["Replies"] = replies_dict.get(user_id, DEFAULT_VALUES["Replies"])
             user_metrics_data[user_id]["Mentions"] = mentions_dict.get(user_id, DEFAULT_VALUES["Mentions"])
             user_metrics_data[user_id]["Favorites"] = favorites_dict.get(user_id, DEFAULT_VALUES["Favorites"])
-
+        
         return user_metrics_data
 
     def _fetch_total_messages(self) -> Dict[str, int]:
@@ -173,10 +187,10 @@ class DataFetcher:
         # Aggregate total messages for each user
         for user_id, topics in message_stats.items():
             total_messages_data[user_id] = sum(topic.get("totalMessages", 0) for topic in topics)
-
+            
         return total_messages_data
 
-    def fetch_user_relations(self, user_id=None, limit=50, offset=0, relation="pending"):
+    def fetch_user_relations(self, user_id=None, limit=50, offset=0, relation="friends"):
         """
         Fetch user relations from the API with optional pagination and filtering.
 
@@ -190,10 +204,9 @@ class DataFetcher:
             list: List of user relations.
         """
         
-        url = f"{self.api_url}/users/relations"
+        url = f"{self.api_url}/api/users/relations"
         params = {"limit": limit, "offset": offset}
         data = {"relation": relation, "user_id": user_id} if user_id else {"relation": relation}
-        print("Fetching for:",user_id)
         return self._make_request(url, user_id=user_id, params=params, json_data=data) or []
     
 
@@ -230,7 +243,7 @@ class DataFetcher:
             if user_id in user_posts_data:
                 if user_posts_data[user_id] is None or (created_ts and created_ts > user_posts_data[user_id]):
                     user_posts_data[user_id] = created_ts
-
+        
         return user_posts_data
     
 
@@ -268,5 +281,13 @@ class DataFetcher:
             # Update posts_created_ts (latest post timestamp)
             if "Posts_created_ts" not in user_data[user_id] or user_data[user_id]["Posts_created_ts"] is None:
                 user_data[user_id]["Posts_created_ts"] = posts_created_ts.get(user_id, None)
+            
+            # Final cleanup: replace any None or NaN with DEFAULT_VALUES
+            for key, default in DEFAULT_VALUES.items():
+                val = user_data[user_id].get(key, default)
+                if val is None or (isinstance(val, float) and math.isnan(val)):
+                    user_data[user_id][key] = default
         
+        sample_user_id = self.user_ids[0]
+        print("Keys for user_data:", list(user_data[sample_user_id].keys()))
         return user_data

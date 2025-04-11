@@ -4,6 +4,7 @@ import os
 # Database connection settings
 DB_CONFIG = {
     "crewdb": {"host": "34.44.52.84", "port": 5432, "user": "admin_crew", "password": "xV/nI2+=uOI&KL1P"},
+    "productdb": {"host": "34.44.52.84", "port": 5432, "user": "admin_crew", "password": "xV/nI2+=uOI&KL1P"},
     # Add other databases here
 }
 
