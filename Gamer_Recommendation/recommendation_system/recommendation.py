@@ -10,8 +10,7 @@ from utils import APIClient
 from utils import LossPlotter
 from utils import ModelTrainer
 from database import init_db_pools
-
-
+from datetime import datetime
 
 # Import custom modules from the respective directories
 from data_preprocessing import DataLoader
@@ -35,20 +34,46 @@ class RecommendationSystem:
             "user_specialization": [],
             "recommended_users": []
         }
+    
+    def calculate_age(self, dob):
+        if dob is None:
+            return None
+        today = datetime.today()
+        # Assuming dob is in 'YYYY-MM-DD' format
+        birth_date = datetime.strptime(str(dob), '%Y-%m-%d')
+        age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+        return age
 
     def recommend_top_users(self, df, game_id, user_id, offset, num_recommendations=20, filters=None):
+        from database.queries import fetch_all_users_data
         try:
-            user_age = df[df['player_id'] == user_id]['age']
-            if user_age.empty:
-                self._empty_response(game_id, user_id, offset)
-                
-            user_dob = user_age.values[0]
-            
+            if df.empty:
+                return self._empty_response(game_id, user_id, offset)
+
+            original_user_id = user_id
+            fallback_user_id = "dCUKB2Vf9Zk"
+
+            user_age_row = df[df['player_id'] == user_id]
+            if user_age_row.empty:
+                user_id = fallback_user_id
+                dob_records = fetch_all_users_data(
+                    table="user",
+                    database_name="crewdb", 
+                    columns=["dob"],
+                    conditions=[{"field": "id", "operator": "=", "value": user_id}],
+                    limit=1
+                )
+                if not dob_records:
+                    return self._empty_response(game_id, original_user_id, offset)
+                user_dob = self.calculate_age(dob_records[0]['dob'])
+            else:
+                user_dob = user_age_row['age'].values[0]
+
             all_specializations = get_specialisations(df['player_id'].tolist())
-            user_specializations = all_specializations.get(user_id, [])
-            
+            user_specializations = all_specializations.get(original_user_id, [])
+
             if filters:
-                 df = DataFilter.process_filters(
+                df = DataFilter.process_filters(
                     df,
                     game_id,
                     filters.get('country'),
@@ -58,9 +83,9 @@ class RecommendationSystem:
                     filters.get('age_delta', 12)
                 )
             if df.empty:
-                self._empty_response(game_id, user_id, offset)
-            api_client = APIClient(API_BASE_URL, user_id)
+                return self._empty_response(game_id, original_user_id, offset)
             
+            api_client = APIClient(API_BASE_URL, original_user_id)
             relationships = {
                 "friends": set(relation['player_id'] for relation in api_client.fetch_user_relations(limit=50, offset=0, relation="friends")),
                 "blocked": set(relation['player_id'] for relation in api_client.fetch_user_relations(limit=50, offset=0, relation="blocked_list")),
@@ -68,8 +93,6 @@ class RecommendationSystem:
             }
 
             df = df[~df['player_id'].isin(relationships["blocked"] | relationships["reported"])]
-            if df.empty:
-               self._empty_response(game_id, user_id, offset)
 
             game_idx = self.mapping_layer.map_game_id(game_id)
             user_idx = self.mapping_layer.map_user_id(user_id)
@@ -80,6 +103,11 @@ class RecommendationSystem:
             game_input = np.full(len(user_input_indices), game_idx, dtype=np.int32)
 
             (_, _, game_features, global_features), _ = self.dataset_preparer.create_input_tensors(df, self.mapping_layer)
+
+            # Safety: check again right before predict
+            if len(user_input_indices) == 0:
+                return self._empty_response(game_id, original_user_id, offset)
+
             inputs = (user_input_indices, game_input, game_features, global_features)
             scores = self.model.predict(inputs)
 
@@ -88,10 +116,13 @@ class RecommendationSystem:
             if min_score < 0:
                 df['score'] -= min_score
 
-            interaction_map = get_interaction_type(user_id, df['player_id'].tolist())
+            interaction_map = get_interaction_type(original_user_id, df['player_id'].tolist())
             df = ScoreAdjuster.adjust_scores(df, interaction_map, relationships)
 
-            df = df[df['player_id'] != user_id]
+            df = df[df['player_id'] != original_user_id]
+            if df.empty:
+                return self._empty_response(game_id, original_user_id, offset)
+
             top_users = df.nlargest(num_recommendations, 'score')
             recommended_users = [
                 {
@@ -107,21 +138,22 @@ class RecommendationSystem:
 
             return {
                 "game_id": int(game_id),
-                "user_id": str(user_id),
+                "user_id": str(original_user_id),
                 "offset": int(offset),
                 "user_specialization": user_specializations,
                 "recommended_users": recommended_users,
             }
 
         except Exception as e:
-            raise ValueError(f"An error occurred while generating recommendations: {str(e)}")
-
-
+            print(f"Error in recommend_top_users: {e}")
+            return self._empty_response(game_id, user_id, offset)
+    
+    
 if __name__ == "__main__":
     # Load your data and initialize the model, dataset preparer, and mapping layer here
     init_db_pools()
     
-    data_loader = DataLoader('../Datasets/request.json')
+    data_loader = DataLoader('../Datasets/generated_players.json')
     raw_data = data_loader.load_data()
 
     preprocessor = DataPreprocessor()
