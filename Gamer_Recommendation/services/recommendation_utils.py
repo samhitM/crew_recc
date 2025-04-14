@@ -75,7 +75,7 @@ def periodic_model_training():
         now = datetime.now(ist)
 
         # Calculate the next scheduled time (1 hour before midnight, and every 8 hours after that)
-        midnight_ist = now.replace(hour=23, minute=0, second=0, microsecond=0)
+        midnight_ist = now.replace(hour=00, minute=10, second=0, microsecond=0)
         if now > midnight_ist:
             midnight_ist += timedelta(days=1)
 
@@ -90,7 +90,7 @@ def periodic_model_training():
         # Start model training
         try:
             print(f"Model training started at: {datetime.now(ist).strftime('%Y-%m-%d %H:%M:%S IST')}")
-            load_data("Periodic model")
+            load_data()
 
             # Prepare datasets
             with recommendation_cache_lock:
