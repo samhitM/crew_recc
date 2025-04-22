@@ -43,6 +43,12 @@ class RecommendationSystem:
         birth_date = datetime.strptime(str(dob), '%Y-%m-%d')
         age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
         return age
+    
+    def safe_extract_relations(self, api_client, relation_type):
+        response = api_client.fetch_user_relations(limit=50, offset=0, relation=relation_type)
+        if isinstance(response, dict) and 'message' in response:
+            return set()  # No relations found
+        return set(relation['player_id'] for relation in response if 'player_id' in relation)
 
     def recommend_top_users(self, df, game_id, user_id, offset, num_recommendations=20, filters=None):
         from database.queries import fetch_all_users_data
@@ -86,14 +92,15 @@ class RecommendationSystem:
                 return self._empty_response(game_id, original_user_id, offset)
             
             api_client = APIClient(API_BASE_URL, original_user_id)
+
             relationships = {
-                "friends": set(relation['player_id'] for relation in api_client.fetch_user_relations(limit=50, offset=0, relation="friends")),
-                "blocked": set(relation['player_id'] for relation in api_client.fetch_user_relations(limit=50, offset=0, relation="blocked_list")),
-                "reported": set(relation['player_id'] for relation in api_client.fetch_user_relations(limit=50, offset=0, relation="report_list"))
+                "friends": self.safe_extract_relations(api_client, "friends"),
+                "blocked": self.safe_extract_relations(api_client, "blocked_list"),
+                "reported": self.safe_extract_relations(api_client, "report_list")
             }
-
+            
             df = df[~df['player_id'].isin(relationships["blocked"] | relationships["reported"])]
-
+            
             game_idx = self.mapping_layer.map_game_id(game_id)
             user_idx = self.mapping_layer.map_user_id(user_id)
             if game_idx is None or user_idx is None:
