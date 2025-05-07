@@ -2,6 +2,7 @@ from database import get_endpoint_data, fetch_all_users_data
 from recommendation_system import RecommendationSystem
 from data_preprocessing import DataPreprocessor, DatasetPreparer, MappingLayer
 from models import SiameseRecommendationModel
+from utils.model_io import load_latest_model
 from cache.recommendation_cache import recommendation_cache
 from utils import ModelTrainer
 import threading
@@ -42,9 +43,14 @@ def initialize_recommendation_system():
         # Initialize and train a new model
         num_users = len(recommendation_cache.preprocessed_data['player_id'].unique())
         num_games = len(recommendation_cache.preprocessed_data['game_id'].unique())
-
+        
+        latest_model, path = load_latest_model(custom_objects={"SiameseRecommendationModel": SiameseRecommendationModel})
         embedding_dim = 512
-        siamese_model = SiameseRecommendationModel(num_users=num_users, num_games=num_games, embedding_dim=embedding_dim)
+
+        if latest_model:
+            siamese_model = latest_model
+        else:
+            siamese_model = SiameseRecommendationModel(num_users=num_users, num_games=num_games, embedding_dim=embedding_dim)
         model_trainer = ModelTrainer(model=siamese_model, learning_rate=0.001, batch_size=128, epochs=65)
         model_trainer.train_model(train_dataset, train_dataset)
         
@@ -75,7 +81,7 @@ def periodic_model_training():
         now = datetime.now(ist)
 
         # Calculate the next scheduled time (1 hour before midnight, and every 8 hours after that)
-        midnight_ist = now.replace(hour=00, minute=10, second=0, microsecond=0)
+        midnight_ist = now.replace(hour=23, minute=00, second=0, microsecond=0)
         if now > midnight_ist:
             midnight_ist += timedelta(days=1)
 
