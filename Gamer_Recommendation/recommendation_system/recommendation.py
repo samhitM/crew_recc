@@ -51,49 +51,6 @@ class RecommendationSystem:
             return set()  # No relations found
         return set(relation['player_id'] for relation in response if 'player_id' in relation)
     
-    # def safe_extract_friends(self, user_id):
-    #     friends = set()
-
-    #     # Fetch rows where either user_a_id or user_b_id matches user_id and the relation is active
-    #     conditions = [
-    #         {"field": "state", "operator": "=", "value": True}
-    #     ]
-
-    #     records = fetch_all_users_data(
-    #         table="friendship",
-    #         database_name="crewdb",
-    #         columns=["user_a_id", "user_b_id", "relation"],
-    #         conditions=conditions,
-    #         limit=1000
-    #     )
-        
-    #     print(records)
-
-    #     for record in records:
-    #         user_a = record.get('user_a_id')
-    #         user_b = record.get('user_b_id')
-    #         relation_data = record.get('relation')
-
-    #         # Skip if user_id is not involved
-    #         if user_id not in (user_a, user_b):
-    #             continue
-
-    #         relation_key = f"{user_a}_{user_b}" if user_id == user_a else f"{user_b}_{user_a}"
-    #         relation_entry = relation_data.get(relation_key)
-
-    #         if not relation_entry:
-    #             continue  # Skip if no relation data for this pair
-
-    #         # Identify the friend
-    #         friend_id = user_b if user_id == user_a else user_a
-
-    #         friend_data = relation_entry.get(friend_id)
-
-    #         if friend_data and friend_data.get('status') == 'friends':
-    #             friends.add(friend_id)
-
-    #     return friends
-    
     def safe_extract_friends(self, user_id):
         friends = set()
 
@@ -183,8 +140,8 @@ class RecommendationSystem:
                 "reported": self.safe_extract_relations(api_client, "report_list")
             }
             
-            print("Relationships")
-            print(relationships)
+            # print("Relationships")
+            # print(relationships)
             
             df = df[~df['player_id'].isin(relationships["blocked"] | relationships["reported"])]
             
