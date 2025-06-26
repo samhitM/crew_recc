@@ -45,7 +45,7 @@ class StandaloneCrewImpressionCalculator:
             'out_degree': 0.3
         }
         
-        # Default feature weights (fallback if regression fails)
+        # Default feature weights
         self.default_feature_weights = {
             'reposts': 0.15,
             'replies': 0.15,

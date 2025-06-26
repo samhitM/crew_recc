@@ -563,6 +563,18 @@ class StandaloneCrewLevelCalculator:
         if threshold_method is None:
             threshold_method = self.threshold_method
         
+        # Check if results already exist
+        output_file = "crew_levels_revised.csv"
+        if os.path.exists(output_file):
+            print(f"Found existing level results in {output_file}")
+            try:
+                existing_df = pd.read_csv(output_file)
+                print(f"Loaded existing level data for {len(existing_df)} users")
+                return existing_df
+            except Exception as e:
+                print(f"Error reading existing file: {e}")
+                print("Proceeding with fresh calculation...")
+        
         # Step 1: Get gaming data and calculate gaming scores
         gaming_data = self.fetch_user_games_data()
         gaming_scores = self.calculate_gaming_activity_score(gaming_data)
@@ -606,6 +618,18 @@ class StandaloneCrewLevelCalculator:
         
         df = pd.DataFrame(results)
         print(f"Calculated crew levels for {len(df)} users")
+        
+        # Save results with error handling
+        try:
+            df.to_csv(output_file, index=False)
+            print(f"Results saved to {output_file}")
+        except PermissionError:
+            print(f"Permission denied saving to {output_file}. File may be open in another program.")
+            # Try alternative filename
+            alt_file = f"crew_levels_revised_{int(pd.Timestamp.now().timestamp())}.csv"
+            df.to_csv(alt_file, index=False)
+            print(f"Results saved to alternative file: {alt_file}")
+        
         return df
     
     def plot_level_distribution(self, df: pd.DataFrame, output_path: str = "level_plots.png"):
