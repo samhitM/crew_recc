@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore")
 
 class StandaloneCrewImpressionCalculator:
     """
-    Standalone revised implementation for calculating crew impressions based on:
+    Implementation for calculating crew impressions based on:
     1. Graph-based topological scores (PageRank, K-Shell, Out-Degree)
     2. Data-driven feature weights using linear regression
     3. Website impressions from profile visits
@@ -354,7 +354,7 @@ class StandaloneCrewImpressionCalculator:
         """Calculate website impressions based on profile visits."""
         print("Calculating website impressions...")
         
-        # Default to 0 as specified, but can be enhanced with real data
+        # Default to 0 
         website_impressions = {}
         
         for user_id in user_ids:
@@ -439,11 +439,11 @@ class StandaloneCrewImpressionCalculator:
                 rescaled_feature.get(user_id, 0) + 
                 rescaled_impressions.get(user_id, 0)
             )
-            
+            #posts and messages count is set to 0 since the posts, messages, and total_messages tables in the db are empty
             results.append({
                 'user_id': user_id,
-                'posts': 0,  # Default to 0 as specified
-                'messages': 0,  # Default to 0 as specified
+                'posts': 0,  
+                'messages': 0,  
                 'pagerank': pagerank,
                 'k_shell': graph_metrics[user_id]['k_shell'],
                 'out_degree': graph_metrics[user_id]['out_degree'],
@@ -468,74 +468,15 @@ class StandaloneCrewImpressionCalculator:
             print(f"Results saved to alternative file: {alt_file}")
         
         return df
-    
-    def plot_impressions(self, df: pd.DataFrame, output_path: str = "impression_plots.png"):
-        """Plot impressions vs user_id."""
-        if df.empty:
-            print("No data to plot")
-            return
-        
-        try:
-            plt.figure(figsize=(12, 8))
-            
-            # Plot total impression scores
-            plt.subplot(2, 2, 1)
-            plt.scatter(range(len(df)), df['total_impression_score'], alpha=0.6)
-            plt.title('Total Impression Score vs User Index')
-            plt.xlabel('User Index')
-            plt.ylabel('Total Impression Score')
-            
-            # Plot PageRank scores
-            plt.subplot(2, 2, 2)
-            plt.scatter(range(len(df)), df['pagerank'], alpha=0.6, color='orange')
-            plt.title('PageRank vs User Index')
-            plt.xlabel('User Index')
-            plt.ylabel('PageRank')
-            
-            # Plot score distribution
-            plt.subplot(2, 2, 3)
-            plt.hist(df['total_impression_score'], bins=20, alpha=0.7)
-            plt.title('Distribution of Total Impression Scores')
-            plt.xlabel('Total Impression Score')
-            plt.ylabel('Frequency')
-            
-            # Plot component scores
-            plt.subplot(2, 2, 4)
-            plt.scatter(range(len(df)), df['topological_score'], alpha=0.6, label='Topological', s=20)
-            plt.scatter(range(len(df)), df['user_feature_score'], alpha=0.6, label='Feature', s=20)
-            plt.scatter(range(len(df)), df['website_impressions'], alpha=0.6, label='Web', s=20)
-            plt.title('Component Scores vs User Index')
-            plt.xlabel('User Index')
-            plt.ylabel('Score')
-            plt.legend()
-            
-            plt.tight_layout()
-            plt.savefig(output_path, dpi=300, bbox_inches='tight')
-            print(f"Plots saved to {output_path}")
-            
-        except Exception as e:
-            print(f"Error creating plots: {e}")
 
 if __name__ == "__main__":
     calculator = StandaloneCrewImpressionCalculator()
     results_df = calculator.calculate_final_impressions()
     
     if not results_df.empty:
-        # Save results
         output_file = "crew_impressions_revised.csv"
         results_df.to_csv(output_file, index=False)
         print(f"Results saved to {output_file}")
-        
-        # Plot results
-        calculator.plot_impressions(results_df)
-        
-        # Print summary statistics
-        print("\nSummary Statistics:")
-        print(results_df[['pagerank', 'topological_score', 'user_feature_score', 'total_impression_score']].describe())
-        
-        # Print feature weights
-        print("\nLearned Feature Weights:")
-        for feature, weight in calculator.feature_weights.items():
-            print(f"  {feature}: {weight:.4f}")
+
     else:
         print("No results to save")

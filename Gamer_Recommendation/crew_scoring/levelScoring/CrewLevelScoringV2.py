@@ -17,7 +17,7 @@ warnings.filterwarnings("ignore")
 
 class StandaloneCrewLevelCalculator:
     """
-    Standalone revised implementation for calculating crew levels based on:
+    Implementation for calculating crew levels based on:
     1. Gaming Activity Score (using gaming_time from user_games table)
     2. Impression Score (from impression scoring)
     3. Community Detection Score (Louvain algorithm)
@@ -99,7 +99,6 @@ class StandaloneCrewLevelCalculator:
                     gaming_time = float(row[1] or 0)
                     
                     # Convert gaming time to gaming activity components
-                    # Since we only have gaming_time, we'll derive other metrics from it
                     gaming_data[user_id] = {
                         'max_hours': gaming_time,
                         'achievements': min(50, gaming_time / 10),  # Derived: 1 achievement per 10 hours
@@ -166,15 +165,12 @@ class StandaloneCrewLevelCalculator:
                 continue
                 
             try:
-                # Parse JSON if it's a string
                 if isinstance(relation_data, str):
                     relation_data = json.loads(relation_data)
                 
-                # Add nodes
                 self.graph.add_node(user_a)
                 self.graph.add_node(user_b)
                 
-                # Check if they are friends
                 is_friends = False
                 if isinstance(relation_data, dict):
                     for key, value in relation_data.items():
@@ -190,8 +186,6 @@ class StandaloneCrewLevelCalculator:
                                 break
                 
                 if is_friends:
-                    # Add edge with weight (co-play frequency or message count)
-                    # For now, use weight = 1, can be enhanced with actual interaction data
                     self.graph.add_edge(user_a, user_b, weight=1)
                     edges_added += 1
                     
@@ -655,193 +649,6 @@ class StandaloneCrewLevelCalculator:
         
         return df
     
-    def plot_level_distribution(self, df: pd.DataFrame, output_path: str = "level_plots.png"):
-        """Plot level distribution and score analysis."""
-        if df.empty:
-            print("No data to plot")
-            return
-        
-        try:
-            plt.figure(figsize=(15, 10))
-            
-            # Plot 1: Level distribution
-            plt.subplot(2, 3, 1)
-            level_counts = df['crew_level'].value_counts().sort_index()
-            plt.bar(level_counts.index, level_counts.values)
-            plt.title('Crew Level Distribution')
-            plt.xlabel('Crew Level')
-            plt.ylabel('Number of Users')
-            
-            # Plot 2: Composite score distribution
-            plt.subplot(2, 3, 2)
-            plt.hist(df['composite_score'], bins=20, alpha=0.7)
-            plt.title('Composite Score Distribution')
-            plt.xlabel('Composite Score')
-            plt.ylabel('Frequency')
-            
-            # Plot 3: Gaming time vs Level
-            plt.subplot(2, 3, 3)
-            for level in sorted(df['crew_level'].unique()):
-                level_data = df[df['crew_level'] == level]
-                plt.scatter(level_data['gaming_time'], [level] * len(level_data), 
-                           alpha=0.6, label=f'Level {level}')
-            plt.title('Gaming Time vs Crew Level')
-            plt.xlabel('Gaming Time (hours)')
-            plt.ylabel('Crew Level')
-            plt.legend()
-            
-            # Plot 4: Score components by level
-            plt.subplot(2, 3, 4)
-            score_cols = ['gaming_score', 'impression_score', 'community_score', 'bonus_score']
-            level_means = df.groupby('crew_level')[score_cols].mean()
-            
-            x = np.arange(len(level_means.index))
-            width = 0.2
-            
-            for i, col in enumerate(score_cols):
-                plt.bar(x + i*width, level_means[col], width, label=col.replace('_', ' ').title())
-            
-            plt.title('Average Score Components by Level')
-            plt.xlabel('Crew Level')
-            plt.ylabel('Average Score')
-            plt.xticks(x + width*1.5, level_means.index)
-            plt.legend()
-            
-            # Plot 5: Composite score vs Level
-            plt.subplot(2, 3, 5)
-            plt.boxplot([df[df['crew_level'] == level]['composite_score'] 
-                        for level in sorted(df['crew_level'].unique())],
-                       labels=sorted(df['crew_level'].unique()))
-            plt.title('Composite Score Distribution by Level')
-            plt.xlabel('Crew Level')
-            plt.ylabel('Composite Score')
-            
-            # Plot 6: Gaming time distribution
-            plt.subplot(2, 3, 6)
-            plt.hist(df['gaming_time'], bins=20, alpha=0.7)
-            plt.title('Gaming Time Distribution')
-            plt.xlabel('Gaming Time (hours)')
-            plt.ylabel('Frequency')
-            
-            plt.tight_layout()
-            plt.savefig(output_path, dpi=300, bbox_inches='tight')
-            print(f"Level plots saved to {output_path}")
-            
-        except Exception as e:
-            print(f"Error creating plots: {e}")
-    
-    def _calculate_knn_thresholds(self, composite_scores: Dict[str, float], 
-                                 num_levels: int) -> List[float]:
-        """Calculate KNN-based thresholds using clustering."""
-        scores = list(composite_scores.values())
-        
-        if len(scores) < 4:
-            print("Too few scores for KNN clustering, using percentile method")
-            return self._calculate_percentile_fallback(scores, num_levels)
-        
-        try:
-            # Find optimal number of clusters if not specified
-            optimal_clusters = self._find_optimal_clusters(scores, num_levels)
-            
-            # Perform K-means clustering on scores
-            scores_array = np.array(scores).reshape(-1, 1)
-            scores_normalized = self.scaler.fit_transform(scores_array)
-            
-            kmeans = KMeans(n_clusters=optimal_clusters, random_state=42, n_init=10)
-            cluster_labels = kmeans.fit_predict(scores_normalized)
-            
-            # Create feature matrix for KNN
-            features = []
-            for i, score in enumerate(scores):
-                features.append([
-                    score,  # Original composite score
-                    i / len(scores),  # Rank position (normalized)
-                    scores_normalized[i][0],  # Normalized score
-                ])
-            
-            features_array = np.array(features)
-            
-            # Train KNN classifier on cluster assignments
-            knn = KNeighborsClassifier(n_neighbors=min(self.knn_neighbors, len(scores) // 2))
-            knn.fit(features_array, cluster_labels)
-            
-            # Calculate cluster centroids and boundaries
-            cluster_info = {}
-            for level in range(optimal_clusters):
-                cluster_mask = cluster_labels == level
-                cluster_scores = np.array(scores)[cluster_mask]
-                
-                if len(cluster_scores) > 0:
-                    cluster_info[level] = {
-                        'min_score': cluster_scores.min(),
-                        'max_score': cluster_scores.max(),
-                        'mean_score': cluster_scores.mean(),
-                        'size': len(cluster_scores)
-                    }
-            
-            # Calculate thresholds as boundaries between clusters
-            # Sort clusters by mean score
-            sorted_clusters = sorted(cluster_info.items(), key=lambda x: x[1]['mean_score'])
-            
-            thresholds = []
-            for i in range(len(sorted_clusters) - 1):
-                current_cluster = sorted_clusters[i][1]
-                next_cluster = sorted_clusters[i + 1][1]
-                
-                # Threshold is midpoint between cluster boundaries
-                threshold = (current_cluster['max_score'] + next_cluster['min_score']) / 2
-                thresholds.append(threshold)
-            
-            print(f"KNN-based thresholds: {thresholds}")
-            print("Cluster information:")
-            for i, (cluster_id, info) in enumerate(sorted_clusters):
-                print(f"  Level {i+1}: {info['size']} users, "
-                      f"score range: {info['min_score']:.3f}-{info['max_score']:.3f}, "
-                      f"mean: {info['mean_score']:.3f}")
-            
-            return thresholds
-            
-        except Exception as e:
-            print(f"Error in KNN thresholding: {e}, falling back to percentile method")
-            return self._calculate_percentile_fallback(scores, num_levels)
-    
-    def _find_optimal_clusters(self, scores: List[float], max_clusters: int = 8) -> int:
-        """Find optimal number of clusters using silhouette score."""
-        if len(scores) < 4:
-            return min(len(scores), 3)
-        
-        scores_array = np.array(scores).reshape(-1, 1)
-        scores_normalized = self.scaler.fit_transform(scores_array)
-        
-        silhouette_scores = []
-        cluster_range = range(2, min(max_clusters + 1, len(scores)))
-        
-        best_score = -1
-        best_clusters = max_clusters
-        
-        for n_clusters in cluster_range:
-            try:
-                kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-                cluster_labels = kmeans.fit_predict(scores_normalized)
-                
-                # Calculate silhouette score
-                silhouette_avg = silhouette_score(scores_normalized, cluster_labels)
-                silhouette_scores.append(silhouette_avg)
-                
-                if silhouette_avg > best_score:
-                    best_score = silhouette_avg
-                    best_clusters = n_clusters
-                    
-            except Exception as e:
-                print(f"Error calculating silhouette for {n_clusters} clusters: {e}")
-                continue
-        
-        if silhouette_scores:
-            print(f"Silhouette scores: {dict(zip(cluster_range, silhouette_scores))}")
-            print(f"Optimal clusters (silhouette): {best_clusters}")
-            return best_clusters
-        
-        return min(max_clusters, len(scores) // 2) if len(scores) >= 4 else 2
     
     def _calculate_percentile_fallback(self, scores: List[float], num_levels: int) -> List[float]:
         """Fallback to percentile-based thresholds."""
@@ -866,19 +673,5 @@ if __name__ == "__main__":
         results_df.to_csv(output_file, index=False)
         print(f"Results saved to {output_file}")
         
-        # Plot results
-        calculator.plot_level_distribution(results_df)
-        
-        # Print summary statistics
-        print("\nSummary Statistics:")
-        print(results_df[['gaming_score', 'impression_score', 'community_score', 'composite_score', 'crew_level']].describe())
-        
-        # Print level statistics
-        print("\nLevel Statistics:")
-        level_stats = results_df.groupby('crew_level').agg({
-            'composite_score': ['mean', 'min', 'max'],
-            'gaming_time': 'mean'
-        }).round(3)
-        print(level_stats)
     else:
         print("No results to save")
