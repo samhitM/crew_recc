@@ -228,22 +228,36 @@ class StandaloneCrewLevelCalculator:
         print("Getting impression scores...")
         
         try:
-            # Read the impression scores from the CSV file
-            impression_file = "crew_impressions_revised.csv"
+            # Look for the impression scores file in the impressionScoring folder
+            impression_file = "../impressionScoring/crew_impressions_revised.csv"
             if os.path.exists(impression_file):
                 df = pd.read_csv(impression_file)
                 
-                # Normalize impression scores to 0-1 range
+                # Use raw impression scores (not normalized) for better level differentiation
                 impression_scores = {}
-                max_score = df['total_impression_score'].max()
-                if max_score > 0:
-                    for _, row in df.iterrows():
-                        impression_scores[row['user_id']] = row['total_impression_score'] / max_score
+                for _, row in df.iterrows():
+                    impression_scores[row['user_id']] = row['total_impression_score']
                 
-                print(f"Loaded impression scores for {len(impression_scores)} users")
+                print(f"Loaded impression scores for {len(impression_scores)} users from {impression_file}")
                 return impression_scores
             else:
-                print("No impression scores file found, using default values")
+                # Try alternative locations
+                alt_paths = [
+                    "crew_impressions_revised.csv",  # Current directory
+                    "../../crew_impressions_revised.csv",  # Parent directory
+                    "../crew_impressions_revised.csv"  # One level up
+                ]
+                
+                for alt_path in alt_paths:
+                    if os.path.exists(alt_path):
+                        df = pd.read_csv(alt_path)
+                        impression_scores = {}
+                        for _, row in df.iterrows():
+                            impression_scores[row['user_id']] = row['total_impression_score']
+                        print(f"Loaded impression scores for {len(impression_scores)} users from {alt_path}")
+                        return impression_scores
+                
+                print("No impression scores file found in any expected location, using default values")
                 return {}
                 
         except Exception as e:
@@ -473,11 +487,20 @@ class StandaloneCrewLevelCalculator:
         
         all_users = set(gaming_scores.keys()) | set(impression_scores.keys()) | set(community_scores.keys()) | set(bonus_scores.keys()) | set(link_prediction_scores.keys())
         
+        # Normalize impression scores to 0-1 range for composite calculation
+        normalized_impression_scores = {}
+        if impression_scores:
+            max_impression = max(impression_scores.values()) if impression_scores.values() else 1
+            if max_impression > 0:
+                normalized_impression_scores = {k: v / max_impression for k, v in impression_scores.items()}
+            else:
+                normalized_impression_scores = {k: 0 for k in impression_scores.keys()}
+        
         composite_scores = {}
         
         for user_id in all_users:
             gaming = gaming_scores.get(user_id, 0)
-            impression = impression_scores.get(user_id, 0)
+            impression = normalized_impression_scores.get(user_id, 0)  # Use normalized for composite
             community = community_scores.get(user_id, 0)
             bonus = bonus_scores.get(user_id, 0)
             link_prediction = link_prediction_scores.get(user_id, 0)
