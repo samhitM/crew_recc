@@ -56,7 +56,8 @@ class StandaloneCrewImpressionCalculator:
             'profile_likes': 0.1,
             'user_games': 0.1,
             'verified_status': 0.1,
-            'posts_on_topic': 0.05
+            'posts_on_topic': 0.05,
+            'messages': 0.1  # Added messages feature weight
         }
     
     def get_db_connection(self):
@@ -124,6 +125,38 @@ class StandaloneCrewImpressionCalculator:
                 
         except Exception as e:
             print(f"Error fetching user games data: {e}")
+            return {}
+        finally:
+            conn.close()
+    
+    def fetch_message_counts(self) -> Dict[str, int]:
+        """Fetch message counts from message table based on sender_id."""
+        conn = self.get_db_connection()
+        if not conn:
+            return {}
+        
+        try:
+            with conn.cursor() as cur:
+                query = """
+                SELECT sender_id, COUNT(*) as message_count 
+                FROM message 
+                GROUP BY sender_id
+                LIMIT 10000
+                """
+                cur.execute(query)
+                results = cur.fetchall()
+                
+                message_data = {}
+                for row in results:
+                    sender_id = row[0]
+                    message_count = int(row[1] or 0)
+                    message_data[sender_id] = message_count
+                
+                print(f"Fetched message counts for {len(message_data)} users")
+                return message_data
+                
+        except Exception as e:
+            print(f"Error fetching message data: {e}")
             return {}
         finally:
             conn.close()
@@ -262,15 +295,16 @@ class StandaloneCrewImpressionCalculator:
         """Prepare feature data for linear regression."""
         print("Preparing feature data...")
         
-        # Get gaming time data
+        # Get gaming time data and message counts
         gaming_data = self.fetch_user_games_data()
+        message_data = self.fetch_message_counts()
         
         # Create feature matrix
         features = []
         user_ids = []
         
         for user_id, metrics in graph_metrics.items():
-            # Default feature values (mostly 0 as specified, except gaming data)
+            # Feature values with actual gaming time and message counts
             feature_vector = {
                 'reposts': 0,  # Default to 0 as specified
                 'replies': 0,
@@ -281,7 +315,8 @@ class StandaloneCrewImpressionCalculator:
                 'profile_likes': 0,
                 'user_games': gaming_data.get(user_id, 0),  # Use actual gaming time
                 'verified_status': 0,
-                'posts_on_topic': 0
+                'posts_on_topic': 0,
+                'messages': message_data.get(user_id, 0)  # Use actual message count
             }
             
             features.append(list(feature_vector.values()))
@@ -432,6 +467,10 @@ class StandaloneCrewImpressionCalculator:
         
         # Step 8: Create final dataframe
         results = []
+        
+        # Get message counts for the final dataframe
+        message_data = self.fetch_message_counts()
+        
         for user_id in user_ids:
             pagerank = graph_metrics[user_id]['pagerank']
             total_impression = (
@@ -439,11 +478,11 @@ class StandaloneCrewImpressionCalculator:
                 rescaled_feature.get(user_id, 0) + 
                 rescaled_impressions.get(user_id, 0)
             )
-            #posts and messages count is set to 0 since the posts, messages, and total_messages tables in the db are empty
+            
             results.append({
                 'user_id': user_id,
-                'posts': 0,  
-                'messages': 0,  
+                'posts': 0,  # Keep posts as 0 since table is empty
+                'messages': message_data.get(user_id, 0),  # Use actual message count
                 'pagerank': pagerank,
                 'k_shell': graph_metrics[user_id]['k_shell'],
                 'out_degree': graph_metrics[user_id]['out_degree'],
