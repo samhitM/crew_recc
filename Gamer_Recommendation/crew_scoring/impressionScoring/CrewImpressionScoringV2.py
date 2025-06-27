@@ -161,10 +161,10 @@ class StandaloneCrewImpressionCalculator:
         finally:
             conn.close()
     
-    def build_friendship_graph(self) -> nx.Graph:
-        """Build a graph from friendship data."""
-        print("Building friendship graph...")
-        self.graph = nx.Graph()
+    def build_friendship_graph(self) -> nx.DiGraph:
+        """Build a directed weighted graph from friendship data."""
+        print("Building directed weighted friendship graph...")
+        self.graph = nx.DiGraph()  # Use directed graph
         friendship_data = self.fetch_friendship_data()
         
         edges_added = 0
@@ -186,61 +186,98 @@ class StandaloneCrewImpressionCalculator:
                 self.graph.add_node(user_a)
                 self.graph.add_node(user_b)
                 
-                # Check if they are friends based on the relation structure
-                is_friends = False
-                
-                # Handle different relation data structures
+                # Extract relationship information and calculate edge weights
                 if isinstance(relation_data, dict):
-                    for key, value in relation_data.items():
-                        if isinstance(value, dict):
-                            for sub_key, sub_value in value.items():
-                                if isinstance(sub_value, dict):
-                                    status = sub_value.get('status', '')
-                                    follows = sub_value.get('follows', False)
-                                    if status in ['accepted', 'friends'] or follows:
-                                        is_friends = True
-                                        break
-                            if is_friends:
-                                break
-                
-                if is_friends:
-                    self.graph.add_edge(user_a, user_b)
-                    edges_added += 1
+                    # Skip the outer key (it's not a user ID), go directly to user relationships
+                    for outer_key, user_relations in relation_data.items():
+                        if isinstance(user_relations, dict):
+                            # Get all user IDs from this relation object
+                            user_ids = list(user_relations.keys())
+                            
+                            # Create bidirectional edges between users based on their individual status
+                            for i, user_a in enumerate(user_ids):
+                                for j, user_b in enumerate(user_ids):
+                                    if i != j:  # Don't create self-loops
+                                        user_a_info = user_relations.get(user_a, {})
+                                        if isinstance(user_a_info, dict):
+                                            status = user_a_info.get('status', '').lower()
+                                            follows = user_a_info.get('follows', False)
+                                            
+                                            # Calculate edge weight based on status and follows
+                                            weight = self._calculate_edge_weight(status, follows)
+                                            
+                                            # Add directed edge from user_a to user_b
+                                            if weight > 0:
+                                                self.graph.add_edge(user_a, user_b, weight=weight)
+                                                edges_added += 1
                     
-            except (json.JSONDecodeError, TypeError) as e:
+            except (json.JSONDecodeError, TypeError, KeyError) as e:
+                # Handle malformed JSON or unexpected structure
                 continue
         
-        print(f"Graph built with {self.graph.number_of_nodes()} nodes and {self.graph.number_of_edges()} edges")
+        print(f"Directed weighted graph built with {self.graph.number_of_nodes()} nodes and {self.graph.number_of_edges()} edges")
         return self.graph
     
+    def _calculate_edge_weight(self, status: str, follows: bool) -> float:
+        """Calculate edge weight based on relationship status and follow status."""
+        # Base weight from status
+        status_weights = {
+            'friends': 1.0,
+            'accepted': 1.0,
+            'pending': 0.5,
+            'request_sent': 0.3,
+            'blocked': 0.1,
+            'reported_list': 0.1,
+            'declined': 0.1,
+            'unknown': 0.1
+        }
+        
+        # Get base weight from status
+        base_weight = status_weights.get(status, 0.1)  # Default 0.1 for unknown statuses
+        
+        # Boost weight if user follows the other
+        if follows:
+            base_weight = min(1.0, base_weight + 0.4)  # Add 0.4 for follows, cap at 1.0
+        
+        return base_weight
+    
     def calculate_graph_metrics(self) -> Dict[str, Dict[str, float]]:
-        """Calculate PageRank, K-Shell, and Out-Degree for all users."""
+        """Calculate PageRank, K-Shell, and Out-Degree for all users in directed weighted graph."""
         if self.graph is None:
             self.build_friendship_graph()
         
-        print("Calculating graph metrics...")
+        print("Calculating graph metrics for directed weighted graph...")
         
         if self.graph.number_of_nodes() == 0:
             print("Empty graph, cannot calculate metrics")
             return {}
         
-        # Remove self-loops and calculate metrics
+        # Remove self-loops
         self.graph.remove_edges_from(nx.selfloop_edges(self.graph))
         
-        # PageRank
+        # PageRank for directed weighted graph
         try:
-            self.pagerank_scores = nx.pagerank(self.graph, alpha=0.85, max_iter=100)
+            self.pagerank_scores = nx.pagerank(self.graph, alpha=0.85, max_iter=100, weight='weight')
         except:
             self.pagerank_scores = {node: 1/self.graph.number_of_nodes() for node in self.graph.nodes()}
         
-        # K-Shell decomposition
+        # K-Shell decomposition (convert to undirected for this metric)
         try:
-            self.k_shell_scores = nx.core_number(self.graph)
+            undirected_graph = self.graph.to_undirected()
+            self.k_shell_scores = nx.core_number(undirected_graph)
         except:
             self.k_shell_scores = {node: 1 for node in self.graph.nodes()}
         
-        # Out-degree (number of connections)
-        self.out_degree_scores = dict(self.graph.degree())
+        # Out-degree (weighted) for directed graph
+        try:
+            self.out_degree_scores = {}
+            for node in self.graph.nodes():
+                # Calculate weighted out-degree
+                weighted_out_degree = sum(self.graph[node][neighbor]['weight'] 
+                                        for neighbor in self.graph.neighbors(node))
+                self.out_degree_scores[node] = weighted_out_degree
+        except:
+            self.out_degree_scores = {node: 0 for node in self.graph.nodes()}
         
         # Combine all metrics
         all_users = set(self.pagerank_scores.keys()) | set(self.k_shell_scores.keys()) | set(self.out_degree_scores.keys())

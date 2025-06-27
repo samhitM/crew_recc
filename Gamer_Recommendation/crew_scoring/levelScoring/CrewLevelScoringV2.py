@@ -148,10 +148,10 @@ class StandaloneCrewLevelCalculator:
         finally:
             conn.close()
     
-    def build_community_graph(self) -> nx.Graph:
-        """Build a graph for community detection."""
-        print("Building community graph...")
-        self.graph = nx.Graph()
+    def build_community_graph(self) -> nx.DiGraph:
+        """Build a directed weighted graph for community detection and link prediction."""
+        print("Building directed weighted community graph...")
+        self.graph = nx.DiGraph()  # Use directed graph
         friendship_data = self.fetch_friendship_data()
         
         edges_added = 0
@@ -165,35 +165,68 @@ class StandaloneCrewLevelCalculator:
                 continue
                 
             try:
+                # Parse JSON if it's a string
                 if isinstance(relation_data, str):
                     relation_data = json.loads(relation_data)
                 
+                # Add nodes
                 self.graph.add_node(user_a)
                 self.graph.add_node(user_b)
                 
-                is_friends = False
+                # Extract relationship information and calculate edge weights
                 if isinstance(relation_data, dict):
-                    for key, value in relation_data.items():
-                        if isinstance(value, dict):
-                            for sub_key, sub_value in value.items():
-                                if isinstance(sub_value, dict):
-                                    status = sub_value.get('status', '')
-                                    follows = sub_value.get('follows', False)
-                                    if status in ['accepted', 'friends'] or follows:
-                                        is_friends = True
-                                        break
-                            if is_friends:
-                                break
-                
-                if is_friends:
-                    self.graph.add_edge(user_a, user_b, weight=1)
-                    edges_added += 1
+                    # Skip the outer key (it's not a user ID), go directly to user relationships
+                    for outer_key, user_relations in relation_data.items():
+                        if isinstance(user_relations, dict):
+                            # Get all user IDs from this relation object
+                            user_ids = list(user_relations.keys())
+                            
+                            # Create bidirectional edges between users based on their individual status
+                            for i, user_a in enumerate(user_ids):
+                                for j, user_b in enumerate(user_ids):
+                                    if i != j:  # Don't create self-loops
+                                        user_a_info = user_relations.get(user_a, {})
+                                        if isinstance(user_a_info, dict):
+                                            status = user_a_info.get('status', '').lower()
+                                            follows = user_a_info.get('follows', False)
+                                            
+                                            # Calculate edge weight based on status and follows
+                                            weight = self._calculate_edge_weight(status, follows)
+                                            
+                                            # Add directed edge from user_a to user_b
+                                            if weight > 0:
+                                                self.graph.add_edge(user_a, user_b, weight=weight)
+                                                edges_added += 1
                     
-            except (json.JSONDecodeError, TypeError) as e:
+            except (json.JSONDecodeError, TypeError, KeyError) as e:
+                # Handle malformed JSON or unexpected structure
                 continue
         
-        print(f"Community graph built with {self.graph.number_of_nodes()} nodes and {self.graph.number_of_edges()} edges")
+        print(f"Directed weighted community graph built with {self.graph.number_of_nodes()} nodes and {self.graph.number_of_edges()} edges")
         return self.graph
+    
+    def _calculate_edge_weight(self, status: str, follows: bool) -> float:
+        """Calculate edge weight based on relationship status and follow status."""
+        # Base weight from status
+        status_weights = {
+            'friends': 1.0,
+            'accepted': 1.0,
+            'pending': 0.5,
+            'request_sent': 0.3,
+            'blocked': 0.1,
+            'reported_list': 0.1,
+            'declined': 0.1,
+            'unknown': 0.1
+        }
+        
+        # Get base weight from status
+        base_weight = status_weights.get(status, 0.1)  # Default 0.1 for unknown statuses
+        
+        # Boost weight if user follows the other
+        if follows:
+            base_weight = min(1.0, base_weight + 0.4)  # Add 0.4 for follows, cap at 1.0
+        
+        return base_weight
     
     def calculate_gaming_activity_score(self, gaming_data: Dict[str, Dict[str, float]]) -> Dict[str, float]:
         """Calculate gaming activity scores for all users."""
