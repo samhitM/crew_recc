@@ -41,11 +41,10 @@ class StandaloneCrewImpressionCalculator:
             "database": "crewdb"
         }
         
-        # Default weights for topological score
+        # Weights for topological score (pagerank + k_shell only)
         self.topological_weights = {
-            'pagerank': 0.4,
-            'k_shell': 0.3, 
-            'out_degree': 0.3
+            'pagerank': 0.5,
+            'k_shell': 0.5
         }
         
         # Default feature weights
@@ -410,7 +409,7 @@ class StandaloneCrewImpressionCalculator:
         plt.close()  # Close to free memory
     
     def calculate_graph_metrics(self) -> Dict[str, Dict[str, float]]:
-        """Calculate PageRank, K-Shell, and Out-Degree for all users in directed weighted graph."""
+        """Calculate PageRank and K-Shell for all users in directed weighted graph."""
         if self.graph is None:
             self.build_friendship_graph()
         
@@ -436,34 +435,22 @@ class StandaloneCrewImpressionCalculator:
         except:
             self.k_shell_scores = {node: 1 for node in self.graph.nodes()}
         
-        # Out-degree (weighted) for directed graph
-        try:
-            self.out_degree_scores = {}
-            for node in self.graph.nodes():
-                # Calculate weighted out-degree
-                weighted_out_degree = sum(self.graph[node][neighbor]['weight'] 
-                                        for neighbor in self.graph.neighbors(node))
-                self.out_degree_scores[node] = weighted_out_degree
-        except:
-            self.out_degree_scores = {node: 0 for node in self.graph.nodes()}
-        
-        # Combine all metrics
-        all_users = set(self.pagerank_scores.keys()) | set(self.k_shell_scores.keys()) | set(self.out_degree_scores.keys())
+        # Combine metrics (no out_degree anymore)
+        all_users = set(self.pagerank_scores.keys()) | set(self.k_shell_scores.keys())
         
         graph_metrics = {}
         for user in all_users:
             graph_metrics[user] = {
                 'pagerank': self.pagerank_scores.get(user, 0.0),
-                'k_shell': self.k_shell_scores.get(user, 0),
-                'out_degree': self.out_degree_scores.get(user, 0)
+                'k_shell': self.k_shell_scores.get(user, 0)
             }
         
         print(f"Calculated metrics for {len(graph_metrics)} users")
         return graph_metrics
     
     def calculate_topological_score(self, graph_metrics: Dict[str, Dict[str, float]]) -> Dict[str, float]:
-        """Calculate topological score combining PageRank, K-Shell, and Out-Degree."""
-        print("Calculating topological scores...")
+        """Calculate topological score combining PageRank and K-Shell only."""
+        print("Calculating topological scores (PageRank + K-Shell)...")
         
         if not graph_metrics:
             return {}
@@ -473,7 +460,6 @@ class StandaloneCrewImpressionCalculator:
         # Extract values for normalization
         pagerank_values = [metrics['pagerank'] for metrics in graph_metrics.values()]
         k_shell_values = [metrics['k_shell'] for metrics in graph_metrics.values()]
-        out_degree_values = [metrics['out_degree'] for metrics in graph_metrics.values()]
         
         # Normalize to [0, 1] range
         def normalize_values(values):
@@ -483,14 +469,12 @@ class StandaloneCrewImpressionCalculator:
         
         norm_pagerank = normalize_values(pagerank_values)
         norm_k_shell = normalize_values(k_shell_values)
-        norm_out_degree = normalize_values(out_degree_values)
         
-        # Calculate weighted topological score
+        # Calculate weighted topological score (pagerank + k_shell)
         for i, user in enumerate(graph_metrics.keys()):
             topological_score = (
                 self.topological_weights['pagerank'] * norm_pagerank[i] +
-                self.topological_weights['k_shell'] * norm_k_shell[i] +
-                self.topological_weights['out_degree'] * norm_out_degree[i]
+                self.topological_weights['k_shell'] * norm_k_shell[i]
             )
             topological_scores[user] = topological_score
         
@@ -685,8 +669,8 @@ class StandaloneCrewImpressionCalculator:
         return norm_topological, norm_feature, norm_impressions
     
     def calculate_final_impressions(self) -> pd.DataFrame:
-        """Main method to calculate final impression scores."""
-        print("Starting revised crew impression calculation...")
+        """Main method to calculate final impression scores with individual normalization."""
+        print("Starting revised crew impression calculation with individual normalization...")
         
         # Check if results already exist
         output_file = "crew_impressions_revised.csv"
@@ -710,8 +694,11 @@ class StandaloneCrewImpressionCalculator:
         # Visualize the graph after building
         self.visualize_graph("friendship_graph_with_interactions.png")
         
-        # Step 2: Calculate topological scores
-        topological_scores = self.calculate_topological_score(graph_metrics)
+        # Step 2: Get raw data
+        user_ids = list(graph_metrics.keys())
+        message_data = self.fetch_message_counts()
+        interaction_data = self.fetch_user_interactions()
+        profile_likes_data = self.calculate_profile_likes(interaction_data)
         
         # Step 3: Prepare feature data and learn weights
         feature_df, feature_names = self.prepare_feature_data(graph_metrics)
@@ -722,46 +709,66 @@ class StandaloneCrewImpressionCalculator:
         user_feature_scores = self.calculate_user_feature_scores(feature_df, feature_weights)
         
         # Step 5: Calculate website impressions
-        user_ids = list(graph_metrics.keys())
         website_impressions = self.calculate_website_impressions(user_ids)
         
-        # Step 6: Normalize all scores comprehensively
-        norm_topological, norm_feature, norm_impressions = self.normalize_all_scores_comprehensive(
-            topological_scores, user_feature_scores, website_impressions)
+        # Step 6: Extract individual components for normalization
+        raw_pagerank = {user: graph_metrics[user]['pagerank'] for user in user_ids}
+        raw_k_shell = {user: graph_metrics[user]['k_shell'] for user in user_ids}
+        raw_messages = {user: message_data.get(user, 0) for user in user_ids}
+        raw_profile_likes = {user: profile_likes_data.get(user, 0) for user in user_ids}
         
-        # Step 7: Rescale to meaningful ranges (keeping normalization properties)
-        rescaled_topological = self.rescale_scores(norm_topological, 50, 15)
-        rescaled_feature = self.rescale_scores(norm_feature, 30, 10)
-        rescaled_impressions = self.rescale_scores(norm_impressions, 20, 8)
+        # Step 7: Normalize each component individually
+        print("Normalizing each component individually...")
+        norm_pagerank = self.normalize_scores(raw_pagerank)
+        norm_k_shell = self.normalize_scores(raw_k_shell)
+        norm_messages = self.normalize_scores(raw_messages)
+        norm_profile_likes = self.normalize_scores(raw_profile_likes)
+        norm_user_feature_scores = self.normalize_scores(user_feature_scores)
+        norm_website_impressions = self.normalize_scores(website_impressions)
         
-        # Step 8: Create final dataframe
-        results = []
-        
-        # Get message counts and profile likes for the final dataframe
-        message_data = self.fetch_message_counts()
-        interaction_data = self.fetch_user_interactions()
-        profile_likes_data = self.calculate_profile_likes(interaction_data)
-        
-        for user_id in user_ids:
-            pagerank = graph_metrics[user_id]['pagerank']
-            total_impression = (
-                rescaled_topological.get(user_id, 0) + 
-                rescaled_feature.get(user_id, 0) + 
-                rescaled_impressions.get(user_id, 0)
+        # Step 8: Calculate topological score (pagerank + k_shell) and normalize
+        raw_topological_scores = {}
+        for user in user_ids:
+            raw_topological_scores[user] = (
+                self.topological_weights['pagerank'] * norm_pagerank[user] +
+                self.topological_weights['k_shell'] * norm_k_shell[user]
             )
-            
+        norm_topological_scores = self.normalize_scores(raw_topological_scores)
+        
+        # Step 9: Calculate total impression score and normalize
+        raw_total_impression_scores = {}
+        for user in user_ids:
+            # Sum all normalized components for total impression
+            raw_total_impression_scores[user] = (
+                norm_topological_scores[user] +
+                norm_user_feature_scores[user] +
+                norm_website_impressions[user]
+            )
+        norm_total_impression_scores = self.normalize_scores(raw_total_impression_scores)
+        
+        # Step 10: Create final dataframe with all normalized values
+        results = []
+        for user_id in user_ids:
             results.append({
                 'user_id': user_id,
                 'posts': 0,  # Keep posts as 0 since table is empty
-                'messages': message_data.get(user_id, 0),  # Use actual message count
-                'profile_likes': profile_likes_data.get(user_id, 0),  # Add profile likes
-                'pagerank': pagerank,
-                'k_shell': graph_metrics[user_id]['k_shell'],
-                'out_degree': graph_metrics[user_id]['out_degree'],
-                'topological_score': rescaled_topological.get(user_id, 0),
-                'user_feature_score': rescaled_feature.get(user_id, 0),
-                'website_impressions': rescaled_impressions.get(user_id, 0),
-                'total_impression_score': total_impression
+                'messages': raw_messages[user_id],
+                'profile_likes': raw_profile_likes[user_id],
+                'pagerank': raw_pagerank[user_id],
+                'k_shell': raw_k_shell[user_id],
+                'user_feature_score': user_feature_scores.get(user_id, 0),
+                'website_impressions': website_impressions.get(user_id, 0),
+                'topological_score': raw_topological_scores[user_id],
+                'total_impression_score': raw_total_impression_scores[user_id],
+                # Normalized values
+                'norm_messages': norm_messages[user_id],
+                'norm_profile_likes': norm_profile_likes[user_id],
+                'norm_pagerank': norm_pagerank[user_id],
+                'norm_k_shell': norm_k_shell[user_id],
+                'norm_user_feature_score': norm_user_feature_scores[user_id],
+                'norm_website_impressions': norm_website_impressions[user_id],
+                'norm_topological_score': norm_topological_scores[user_id],
+                'norm_total_impression_score': norm_total_impression_scores[user_id]
             })
         
         df = pd.DataFrame(results)

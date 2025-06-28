@@ -337,8 +337,8 @@ class StandaloneCrewLevelCalculator:
         return gaming_scores
     
     def get_impression_scores(self) -> Dict[str, float]:
-        """Get impression scores from the CSV file created by impression calculator."""
-        print("Getting impression scores...")
+        """Get normalized impression scores from the CSV file created by impression calculator."""
+        print("Getting normalized impression scores...")
         
         try:
             # Look for the impression scores file in the impressionScoring folder
@@ -346,12 +346,12 @@ class StandaloneCrewLevelCalculator:
             if os.path.exists(impression_file):
                 df = pd.read_csv(impression_file)
                 
-                # Use raw impression scores (not normalized) for better level differentiation
+                # Use normalized total impression scores for proper normalization in level scoring
                 impression_scores = {}
                 for _, row in df.iterrows():
-                    impression_scores[row['user_id']] = row['total_impression_score']
+                    impression_scores[row['user_id']] = row['norm_total_impression_score']
                 
-                print(f"Loaded impression scores for {len(impression_scores)} users from {impression_file}")
+                print(f"Loaded normalized impression scores for {len(impression_scores)} users from {impression_file}")
                 return impression_scores
             else:
                 # Try alternative locations
@@ -366,8 +366,8 @@ class StandaloneCrewLevelCalculator:
                         df = pd.read_csv(alt_path)
                         impression_scores = {}
                         for _, row in df.iterrows():
-                            impression_scores[row['user_id']] = row['total_impression_score']
-                        print(f"Loaded impression scores for {len(impression_scores)} users from {alt_path}")
+                            impression_scores[row['user_id']] = row['norm_total_impression_score']
+                        print(f"Loaded normalized impression scores for {len(impression_scores)} users from {alt_path}")
                         return impression_scores
                 
                 print("No impression scores file found in any expected location, using default values")
@@ -637,7 +637,7 @@ class StandaloneCrewLevelCalculator:
                                             impression_scores: Dict[str, float],
                                             community_scores: Dict[str, float], 
                                             bonus_scores: Dict[str, float],
-                                            link_prediction_scores: Dict[str, float]) -> Dict[str, float]:
+                                            link_prediction_scores: Dict[str, float]) -> tuple:
         """Calculate composite scores with comprehensive normalization."""
         print("Calculating composite scores with comprehensive normalization...")
         
@@ -645,7 +645,7 @@ class StandaloneCrewLevelCalculator:
         all_users = set(gaming_scores.keys()) | set(impression_scores.keys()) | set(community_scores.keys()) | set(bonus_scores.keys()) | set(link_prediction_scores.keys())
         
         if not all_users:
-            return {}
+            return {}, {}
         
         # Create a dataframe with all scores for normalization
         data = []
@@ -664,6 +664,18 @@ class StandaloneCrewLevelCalculator:
         # Normalize all features comprehensively
         normalized_df = self.normalize_features_comprehensive(df)
         
+        # Store normalized scores for output
+        normalized_scores = {}
+        for _, row in normalized_df.iterrows():
+            user_id = row['user_id']
+            normalized_scores[user_id] = {
+                'norm_gaming_score': row['gaming_score'],
+                'norm_impression_score': row['impression_score'],
+                'norm_community_score': row['community_score'],
+                'norm_bonus_score': row['bonus_score'],
+                'norm_link_prediction_score': row['link_prediction_score']
+            }
+        
         # Calculate composite scores using normalized values
         composite_scores = {}
         for _, row in normalized_df.iterrows():
@@ -678,7 +690,7 @@ class StandaloneCrewLevelCalculator:
             composite_scores[user_id] = composite_score
         
         print(f"Calculated normalized composite scores for {len(composite_scores)} users")
-        return composite_scores
+        return composite_scores, normalized_scores
     
     def calculate_level_thresholds(self, composite_scores: Dict[str, float], num_levels: int = 5, method: str = 'percentile') -> List[float]:
         """Calculate level thresholds based on score distribution."""
@@ -778,7 +790,7 @@ class StandaloneCrewLevelCalculator:
         bonus_scores = self.calculate_bonus_factors(list(all_users))
         
         # Step 6: Calculate composite scores with normalization
-        composite_scores = self.calculate_composite_scores_normalized(
+        composite_scores, normalized_scores = self.calculate_composite_scores_normalized(
             gaming_scores, self.impression_scores, community_scores, bonus_scores, link_prediction_scores
         )
         
@@ -788,6 +800,9 @@ class StandaloneCrewLevelCalculator:
         # Step 8: Create results dataframe
         results = []
         for user_id in all_users:
+            # Get normalized scores for this user
+            norm_scores = normalized_scores.get(user_id, {})
+            
             results.append({
                 'user_id': user_id,
                 'gaming_score': gaming_scores.get(user_id, 0),
@@ -797,7 +812,14 @@ class StandaloneCrewLevelCalculator:
                 'bonus_score': bonus_scores.get(user_id, 0),
                 'composite_score': composite_scores.get(user_id, 0),
                 'crew_level': level_assignments.get(user_id, 1),
-                'gaming_time': gaming_data.get(user_id, {}).get('max_hours', 0)
+                'gaming_time': gaming_data.get(user_id, {}).get('max_hours', 0),
+                # Add normalized scores
+                'norm_gaming_score': norm_scores.get('norm_gaming_score', 0),
+                'norm_impression_score': norm_scores.get('norm_impression_score', 0),
+                'norm_community_score': norm_scores.get('norm_community_score', 0),
+                'norm_link_prediction_score': norm_scores.get('norm_link_prediction_score', 0),
+                'norm_bonus_score': norm_scores.get('norm_bonus_score', 0),
+                'norm_composite_score': composite_scores.get(user_id, 0)  # Composite score is already normalized
             })
         
         df = pd.DataFrame(results)
