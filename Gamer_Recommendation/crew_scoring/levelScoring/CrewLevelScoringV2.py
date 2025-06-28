@@ -148,11 +148,46 @@ class StandaloneCrewLevelCalculator:
         finally:
             conn.close()
     
+    def fetch_user_interactions(self) -> List[Dict]:
+        """Fetch user interactions from the database."""
+        conn = self.get_db_connection()
+        if not conn:
+            return []
+        
+        try:
+            with conn.cursor() as cur:
+                query = """
+                SELECT user_id, entity_id_primary, interaction_type, action 
+                FROM user_interactions 
+                LIMIT 50000
+                """
+                cur.execute(query)
+                results = cur.fetchall()
+                
+                interaction_data = []
+                for row in results:
+                    interaction_data.append({
+                        'user_id': row[0],
+                        'entity_id_primary': row[1],
+                        'interaction_type': row[2],
+                        'action': row[3]
+                    })
+                
+                print(f"Fetched {len(interaction_data)} user interaction records for community detection")
+                return interaction_data
+                
+        except Exception as e:
+            print(f"Error fetching user interactions data: {e}")
+            return []
+        finally:
+            conn.close()
+    
     def build_community_graph(self) -> nx.DiGraph:
         """Build a directed weighted graph for community detection and link prediction."""
-        print("Building directed weighted community graph...")
+        print("Building directed weighted community graph with user interactions...")
         self.graph = nx.DiGraph()  # Use directed graph
         friendship_data = self.fetch_friendship_data()
+        interaction_data = self.fetch_user_interactions()
         
         edges_added = 0
         
@@ -202,6 +237,37 @@ class StandaloneCrewLevelCalculator:
                 # Handle malformed JSON or unexpected structure
                 continue
         
+        # Add edges from user interactions
+        print("Adding edges from user interactions...")
+        interaction_edges_added = 0
+        
+        for interaction in interaction_data:
+            user_id = interaction.get('user_id')
+            entity_id = interaction.get('entity_id_primary')
+            interaction_type = interaction.get('interaction_type', '').upper()
+            action = interaction.get('action', '').lower()
+            
+            if user_id and entity_id and user_id != entity_id:
+                # Add nodes if they don't exist
+                self.graph.add_node(user_id)
+                self.graph.add_node(entity_id)
+                
+                # Calculate interaction weight
+                interaction_weight = self._calculate_interaction_weight(interaction_type, action)
+                
+                if interaction_weight > 0:
+                    # Check if edge already exists and update weight
+                    if self.graph.has_edge(user_id, entity_id):
+                        current_weight = self.graph[user_id][entity_id]['weight']
+                        # Combine weights (friendship + interaction)
+                        new_weight = min(1.0, current_weight + interaction_weight * 0.3)  # Scale interaction weight
+                        self.graph[user_id][entity_id]['weight'] = new_weight
+                    else:
+                        # Create new edge with interaction weight
+                        self.graph.add_edge(user_id, entity_id, weight=interaction_weight)
+                        interaction_edges_added += 1
+        
+        print(f"Added {interaction_edges_added} interaction edges")
         print(f"Directed weighted community graph built with {self.graph.number_of_nodes()} nodes and {self.graph.number_of_edges()} edges")
         return self.graph
     
@@ -227,6 +293,26 @@ class StandaloneCrewLevelCalculator:
             base_weight = min(1.0, base_weight + 0.4)  # Add 0.4 for follows, cap at 1.0
         
         return base_weight
+    
+    def _calculate_interaction_weight(self, interaction_type: str, action: str) -> float:
+        """Calculate edge weight based on interaction type and action."""
+        interaction_weights = {
+            'PROFILE_INTERACTION': {
+                'like': 0.6,
+                'friend_request': 0.4,
+                'ignored': 0.1
+            },
+            'SWIPE': {
+                'like': 0.3,
+                'friend_request': 0.2,
+                'ignored': 0.05
+            }
+        }
+        
+        if interaction_type in interaction_weights:
+            return interaction_weights[interaction_type].get(action, 0.1)
+        else:
+            return 0.1  # Default for unknown interaction types
     
     def calculate_gaming_activity_score(self, gaming_data: Dict[str, Dict[str, float]]) -> Dict[str, float]:
         """Calculate gaming activity scores for all users."""
@@ -297,6 +383,8 @@ class StandaloneCrewLevelCalculator:
         
         if self.graph is None:
             self.build_community_graph()
+            # Visualize the community graph after building
+            self.visualize_community_graph("community_graph_with_interactions.png")
         
         if self.graph.number_of_nodes() == 0:
             print("Empty graph, cannot calculate link prediction")
@@ -682,6 +770,65 @@ class StandaloneCrewLevelCalculator:
         
         return df
     
+    def visualize_community_graph(self, filename: str = "community_graph.png"):
+        """Visualize the community graph and save as PNG."""
+        if self.graph is None or self.graph.number_of_nodes() == 0:
+            print("No graph to visualize")
+            return
+        
+        print(f"Visualizing community graph with {self.graph.number_of_nodes()} nodes and {self.graph.number_of_edges()} edges...")
+        
+        plt.figure(figsize=(16, 12))
+        
+        # Use spring layout for better visualization
+        pos = nx.spring_layout(self.graph, k=3, iterations=50)
+        
+        # Draw nodes
+        node_sizes = []
+        node_colors = []
+        for node in self.graph.nodes():
+            # Size based on degree
+            degree = self.graph.degree(node)
+            node_sizes.append(max(50, degree * 20))
+            
+            # Color based on in-degree (influence)
+            in_degree = self.graph.in_degree(node)
+            node_colors.append(in_degree)
+        
+        # Draw nodes
+        nx.draw_networkx_nodes(self.graph, pos, 
+                             node_size=node_sizes, 
+                             node_color=node_colors,
+                             cmap=plt.cm.plasma,
+                             alpha=0.7)
+        
+        # Draw edges with weights
+        edges = self.graph.edges()
+        weights = [self.graph[u][v]['weight'] for u, v in edges]
+        
+        nx.draw_networkx_edges(self.graph, pos,
+                             width=[w * 2 for w in weights],
+                             alpha=0.6,
+                             edge_color=weights,
+                             edge_cmap=plt.cm.Blues)
+        
+        # Add labels for high-degree nodes only (to avoid clutter)
+        high_degree_nodes = {node: node for node in self.graph.nodes() 
+                           if self.graph.degree(node) > 3}
+        nx.draw_networkx_labels(self.graph, pos, 
+                              labels=high_degree_nodes,
+                              font_size=8)
+        
+        plt.title(f"Crew Community Graph\n{self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges", 
+                 fontsize=14)
+        plt.colorbar(plt.cm.ScalarMappable(cmap=plt.cm.plasma), 
+                    label='In-Degree (Influence)', shrink=0.8)
+        
+        # Save the plot
+        plt.tight_layout()
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        print(f"Community graph visualization saved as {filename}")
+        plt.close()  # Close to free memory
     
     def _calculate_percentile_fallback(self, scores: List[float], num_levels: int) -> List[float]:
         """Fallback to percentile-based thresholds."""
