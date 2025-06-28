@@ -6,6 +6,9 @@ import pandas as pd
 import networkx as nx
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import silhouette_score
 import matplotlib.pyplot as plt
 from typing import Dict, List, Tuple, Any
 import warnings
@@ -161,11 +164,63 @@ class StandaloneCrewImpressionCalculator:
         finally:
             conn.close()
     
+    def fetch_user_interactions(self) -> List[Dict]:
+        """Fetch user interactions from the database."""
+        conn = self.get_db_connection()
+        if not conn:
+            return []
+        
+        try:
+            with conn.cursor() as cur:
+                query = """
+                SELECT user_id, entity_id_primary, interaction_type, action 
+                FROM user_interactions 
+                LIMIT 50000
+                """
+                cur.execute(query)
+                results = cur.fetchall()
+                
+                interaction_data = []
+                for row in results:
+                    interaction_data.append({
+                        'user_id': row[0],
+                        'entity_id_primary': row[1],
+                        'interaction_type': row[2],
+                        'action': row[3]
+                    })
+                
+                print(f"Fetched {len(interaction_data)} user interaction records")
+                return interaction_data
+                
+        except Exception as e:
+            print(f"Error fetching user interactions data: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def calculate_profile_likes(self, interaction_data: List[Dict]) -> Dict[str, int]:
+        """Calculate profile likes from user interactions."""
+        profile_likes = {}
+        
+        for interaction in interaction_data:
+            entity_id = interaction.get('entity_id_primary')
+            action = interaction.get('action', '').lower()
+            interaction_type = interaction.get('interaction_type', '').upper()
+            
+            # Count likes for profile interactions
+            if interaction_type == 'PROFILE_INTERACTION' and action == 'like':
+                if entity_id:
+                    profile_likes[entity_id] = profile_likes.get(entity_id, 0) + 1
+        
+        print(f"Calculated profile likes for {len(profile_likes)} users")
+        return profile_likes
+    
     def build_friendship_graph(self) -> nx.DiGraph:
-        """Build a directed weighted graph from friendship data."""
-        print("Building directed weighted friendship graph...")
+        """Build a directed weighted graph from friendship data and user interactions."""
+        print("Building directed weighted friendship graph with user interactions...")
         self.graph = nx.DiGraph()  # Use directed graph
         friendship_data = self.fetch_friendship_data()
+        interaction_data = self.fetch_user_interactions()
         
         edges_added = 0
         
@@ -215,6 +270,37 @@ class StandaloneCrewImpressionCalculator:
                 # Handle malformed JSON or unexpected structure
                 continue
         
+        # Add edges from user interactions
+        print("Adding edges from user interactions...")
+        interaction_edges_added = 0
+        
+        for interaction in interaction_data:
+            user_id = interaction.get('user_id')
+            entity_id = interaction.get('entity_id_primary')
+            interaction_type = interaction.get('interaction_type', '').upper()
+            action = interaction.get('action', '').lower()
+            
+            if user_id and entity_id and user_id != entity_id:
+                # Add nodes if they don't exist
+                self.graph.add_node(user_id)
+                self.graph.add_node(entity_id)
+                
+                # Calculate interaction weight
+                interaction_weight = self._calculate_interaction_weight(interaction_type, action)
+                
+                if interaction_weight > 0:
+                    # Check if edge already exists and update weight
+                    if self.graph.has_edge(user_id, entity_id):
+                        current_weight = self.graph[user_id][entity_id]['weight']
+                        # Combine weights (friendship + interaction)
+                        new_weight = min(1.0, current_weight + interaction_weight * 0.3)  # Scale interaction weight
+                        self.graph[user_id][entity_id]['weight'] = new_weight
+                    else:
+                        # Create new edge with interaction weight
+                        self.graph.add_edge(user_id, entity_id, weight=interaction_weight)
+                        interaction_edges_added += 1
+        
+        print(f"Added {interaction_edges_added} interaction edges")
         print(f"Directed weighted graph built with {self.graph.number_of_nodes()} nodes and {self.graph.number_of_edges()} edges")
         return self.graph
     
@@ -240,6 +326,88 @@ class StandaloneCrewImpressionCalculator:
             base_weight = min(1.0, base_weight + 0.4)  # Add 0.4 for follows, cap at 1.0
         
         return base_weight
+    
+    def _calculate_interaction_weight(self, interaction_type: str, action: str) -> float:
+        """Calculate edge weight based on interaction type and action."""
+        interaction_weights = {
+            'PROFILE_INTERACTION': {
+                'like': 0.6,
+                'friend_request': 0.4,
+                'ignored': 0.1
+            },
+            'SWIPE': {
+                'like': 0.3,
+                'friend_request': 0.2,
+                'ignored': 0.05
+            }
+        }
+        
+        if interaction_type in interaction_weights:
+            return interaction_weights[interaction_type].get(action, 0.1)
+        else:
+            return 0.1  # Default for unknown interaction types
+    
+    def visualize_graph(self, filename: str = "friendship_graph.png"):
+        """Visualize the graph and save as PNG."""
+        if self.graph is None or self.graph.number_of_nodes() == 0:
+            print("No graph to visualize")
+            return
+        
+        print(f"Visualizing graph with {self.graph.number_of_nodes()} nodes and {self.graph.number_of_edges()} edges...")
+        
+        plt.figure(figsize=(16, 12))
+        
+        # Use spring layout for better visualization
+        pos = nx.spring_layout(self.graph, k=3, iterations=50)
+        
+        # Draw nodes
+        node_sizes = []
+        node_colors = []
+        for node in self.graph.nodes():
+            # Size based on degree
+            degree = self.graph.degree(node)
+            node_sizes.append(max(50, degree * 20))
+            
+            # Color based on PageRank if available
+            if hasattr(self, 'pagerank_scores') and node in self.pagerank_scores:
+                node_colors.append(self.pagerank_scores[node])
+            else:
+                node_colors.append(0.5)
+        
+        # Draw nodes
+        nx.draw_networkx_nodes(self.graph, pos, 
+                             node_size=node_sizes, 
+                             node_color=node_colors,
+                             cmap=plt.cm.viridis,
+                             alpha=0.7)
+        
+        # Draw edges with weights
+        edges = self.graph.edges()
+        weights = [self.graph[u][v]['weight'] for u, v in edges]
+        
+        nx.draw_networkx_edges(self.graph, pos,
+                             width=[w * 2 for w in weights],
+                             alpha=0.6,
+                             edge_color=weights,
+                             edge_cmap=plt.cm.Blues)
+        
+        # Add labels for high-degree nodes only (to avoid clutter)
+        high_degree_nodes = {node: node for node in self.graph.nodes() 
+                           if self.graph.degree(node) > 3}
+        nx.draw_networkx_labels(self.graph, pos, 
+                              labels=high_degree_nodes,
+                              font_size=8)
+        
+        plt.title(f"Crew Friendship Graph\n{self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges", 
+                 fontsize=14)
+        plt.colorbar(plt.cm.ScalarMappable(cmap=plt.cm.viridis), 
+                    label='PageRank Score', shrink=0.8)
+        
+        # Save the plot
+        plt.tight_layout()
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        print(f"Graph visualization saved as {filename}")
+        plt.close()  # Close to free memory
     
     def calculate_graph_metrics(self) -> Dict[str, Dict[str, float]]:
         """Calculate PageRank, K-Shell, and Out-Degree for all users in directed weighted graph."""
@@ -332,16 +500,18 @@ class StandaloneCrewImpressionCalculator:
         """Prepare feature data for linear regression."""
         print("Preparing feature data...")
         
-        # Get gaming time data and message counts
+        # Get gaming time data, message counts, and interaction data
         gaming_data = self.fetch_user_games_data()
         message_data = self.fetch_message_counts()
+        interaction_data = self.fetch_user_interactions()
+        profile_likes_data = self.calculate_profile_likes(interaction_data)
         
         # Create feature matrix
         features = []
         user_ids = []
         
         for user_id, metrics in graph_metrics.items():
-            # Feature values with actual gaming time and message counts
+            # Feature values with actual gaming time, message counts, and profile likes
             feature_vector = {
                 'reposts': 0,  # Default to 0 as specified
                 'replies': 0,
@@ -349,7 +519,7 @@ class StandaloneCrewImpressionCalculator:
                 'favorites': 0,
                 'interest_topic': 0,
                 'bio_content': 0,
-                'profile_likes': 0,
+                'profile_likes': profile_likes_data.get(user_id, 0),  # Use actual profile likes
                 'user_games': gaming_data.get(user_id, 0),  # Use actual gaming time
                 'verified_status': 0,
                 'posts_on_topic': 0,
@@ -360,7 +530,12 @@ class StandaloneCrewImpressionCalculator:
             user_ids.append(user_id)
         
         feature_names = list(feature_vector.keys())
-        return pd.DataFrame(features, columns=feature_names, index=user_ids), feature_names
+        feature_df = pd.DataFrame(features, columns=feature_names, index=user_ids)
+        
+        # Normalize features comprehensively
+        normalized_feature_df = self.normalize_features_comprehensive(feature_df)
+        
+        return normalized_feature_df, feature_names
     
     def learn_feature_weights(self, feature_df: pd.DataFrame, graph_metrics: Dict[str, Dict[str, float]]) -> Dict[str, float]:
         """Learn feature weights using linear regression with PageRank as target."""
@@ -454,6 +629,61 @@ class StandaloneCrewImpressionCalculator:
         """Rescale normalized scores to a target range."""
         return {k: round(v * target_std + target_mean) for k, v in normalized_scores.items()}
     
+    def normalize_features_comprehensive(self, feature_df: pd.DataFrame) -> pd.DataFrame:
+        """Normalize all features to have mean=0 and std=1."""
+        print("Normalizing features comprehensively (mean=0, std=1)...")
+        
+        # Create a copy to avoid modifying original
+        normalized_df = feature_df.copy()
+        
+        # Apply StandardScaler to each column
+        scaler = StandardScaler()
+        
+        for column in normalized_df.columns:
+            # Get column values
+            values = normalized_df[column].values.reshape(-1, 1)
+            
+            # Check if there's variation in the column
+            if normalized_df[column].std() > 0:
+                # Normalize to mean=0, std=1
+                normalized_values = scaler.fit_transform(values).flatten()
+                normalized_df[column] = normalized_values
+            else:
+                # If no variation, set all values to 0
+                normalized_df[column] = 0.0
+        
+        print(f"Feature normalization completed. Mean values: {normalized_df.mean().round(3).to_dict()}")
+        print(f"Feature std values: {normalized_df.std().round(3).to_dict()}")
+        
+        return normalized_df
+    
+    def normalize_all_scores_comprehensive(self, topological_scores: Dict[str, float], 
+                                         user_feature_scores: Dict[str, float], 
+                                         website_impressions: Dict[str, float]) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float]]:
+        """Normalize all score types to mean=0, std=1."""
+        print("Normalizing all scores comprehensively...")
+        
+        def normalize_score_dict(scores: Dict[str, float], score_name: str) -> Dict[str, float]:
+            values = list(scores.values())
+            if not values or len(values) <= 1:
+                return {k: 0.0 for k in scores.keys()}
+            
+            mean_val = np.mean(values)
+            std_val = np.std(values)
+            
+            if std_val == 0:
+                return {k: 0.0 for k in scores.keys()}
+            
+            normalized = {k: (v - mean_val) / std_val for k, v in scores.items()}
+            print(f"{score_name} normalized: mean={np.mean(list(normalized.values())):.3f}, std={np.std(list(normalized.values())):.3f}")
+            return normalized
+        
+        norm_topological = normalize_score_dict(topological_scores, "Topological scores")
+        norm_feature = normalize_score_dict(user_feature_scores, "Feature scores")
+        norm_impressions = normalize_score_dict(website_impressions, "Website impressions")
+        
+        return norm_topological, norm_feature, norm_impressions
+    
     def calculate_final_impressions(self) -> pd.DataFrame:
         """Main method to calculate final impression scores."""
         print("Starting revised crew impression calculation...")
@@ -477,6 +707,9 @@ class StandaloneCrewImpressionCalculator:
             print("No graph metrics available")
             return pd.DataFrame()
         
+        # Visualize the graph after building
+        self.visualize_graph("friendship_graph_with_interactions.png")
+        
         # Step 2: Calculate topological scores
         topological_scores = self.calculate_topological_score(graph_metrics)
         
@@ -492,12 +725,11 @@ class StandaloneCrewImpressionCalculator:
         user_ids = list(graph_metrics.keys())
         website_impressions = self.calculate_website_impressions(user_ids)
         
-        # Step 6: Normalize all scores
-        norm_topological = self.normalize_scores(topological_scores)
-        norm_feature = self.normalize_scores(user_feature_scores)
-        norm_impressions = self.normalize_scores(website_impressions)
+        # Step 6: Normalize all scores comprehensively
+        norm_topological, norm_feature, norm_impressions = self.normalize_all_scores_comprehensive(
+            topological_scores, user_feature_scores, website_impressions)
         
-        # Step 7: Rescale to meaningful ranges
+        # Step 7: Rescale to meaningful ranges (keeping normalization properties)
         rescaled_topological = self.rescale_scores(norm_topological, 50, 15)
         rescaled_feature = self.rescale_scores(norm_feature, 30, 10)
         rescaled_impressions = self.rescale_scores(norm_impressions, 20, 8)
@@ -505,8 +737,10 @@ class StandaloneCrewImpressionCalculator:
         # Step 8: Create final dataframe
         results = []
         
-        # Get message counts for the final dataframe
+        # Get message counts and profile likes for the final dataframe
         message_data = self.fetch_message_counts()
+        interaction_data = self.fetch_user_interactions()
+        profile_likes_data = self.calculate_profile_likes(interaction_data)
         
         for user_id in user_ids:
             pagerank = graph_metrics[user_id]['pagerank']
@@ -520,6 +754,7 @@ class StandaloneCrewImpressionCalculator:
                 'user_id': user_id,
                 'posts': 0,  # Keep posts as 0 since table is empty
                 'messages': message_data.get(user_id, 0),  # Use actual message count
+                'profile_likes': profile_likes_data.get(user_id, 0),  # Add profile likes
                 'pagerank': pagerank,
                 'k_shell': graph_metrics[user_id]['k_shell'],
                 'out_degree': graph_metrics[user_id]['out_degree'],

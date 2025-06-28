@@ -633,6 +633,53 @@ class StandaloneCrewLevelCalculator:
         print(f"Calculated composite scores for {len(composite_scores)} users")
         return composite_scores
     
+    def calculate_composite_scores_normalized(self, gaming_scores: Dict[str, float], 
+                                            impression_scores: Dict[str, float],
+                                            community_scores: Dict[str, float], 
+                                            bonus_scores: Dict[str, float],
+                                            link_prediction_scores: Dict[str, float]) -> Dict[str, float]:
+        """Calculate composite scores with comprehensive normalization."""
+        print("Calculating composite scores with comprehensive normalization...")
+        
+        # Get all users
+        all_users = set(gaming_scores.keys()) | set(impression_scores.keys()) | set(community_scores.keys()) | set(bonus_scores.keys()) | set(link_prediction_scores.keys())
+        
+        if not all_users:
+            return {}
+        
+        # Create a dataframe with all scores for normalization
+        data = []
+        for user_id in all_users:
+            data.append({
+                'user_id': user_id,
+                'gaming_score': gaming_scores.get(user_id, 0),
+                'impression_score': impression_scores.get(user_id, 0),
+                'community_score': community_scores.get(user_id, 0),
+                'bonus_score': bonus_scores.get(user_id, 0),
+                'link_prediction_score': link_prediction_scores.get(user_id, 0)
+            })
+        
+        df = pd.DataFrame(data)
+        
+        # Normalize all features comprehensively
+        normalized_df = self.normalize_features_comprehensive(df)
+        
+        # Calculate composite scores using normalized values
+        composite_scores = {}
+        for _, row in normalized_df.iterrows():
+            user_id = row['user_id']
+            composite_score = (
+                row['gaming_score'] * self.composite_weights['gaming'] +
+                row['impression_score'] * self.composite_weights['impression'] +
+                row['community_score'] * self.composite_weights['community'] +
+                row['link_prediction_score'] * self.composite_weights['link_prediction'] +
+                row['bonus_score'] * self.composite_weights['bonus']
+            )
+            composite_scores[user_id] = composite_score
+        
+        print(f"Calculated normalized composite scores for {len(composite_scores)} users")
+        return composite_scores
+    
     def calculate_level_thresholds(self, composite_scores: Dict[str, float], num_levels: int = 5, method: str = 'percentile') -> List[float]:
         """Calculate level thresholds based on score distribution."""
         print(f"Calculating level thresholds for {num_levels} levels using {method} method...")
@@ -730,14 +777,13 @@ class StandaloneCrewLevelCalculator:
         all_users = set(gaming_scores.keys()) | set(self.impression_scores.keys()) | set(community_scores.keys()) | set(link_prediction_scores.keys())
         bonus_scores = self.calculate_bonus_factors(list(all_users))
         
-        # Step 6: Calculate composite scores
-        composite_scores = self.calculate_composite_scores(
+        # Step 6: Calculate composite scores with normalization
+        composite_scores = self.calculate_composite_scores_normalized(
             gaming_scores, self.impression_scores, community_scores, bonus_scores, link_prediction_scores
         )
         
-        # Step 7: Calculate thresholds and assign levels
-        thresholds = self.calculate_level_thresholds(composite_scores, method=threshold_method)
-        level_assignments = self.assign_levels(composite_scores, thresholds)
+        # Step 7: Use KNN clustering to assign levels
+        level_assignments = self.assign_levels_with_knn_clustering(composite_scores)
         
         # Step 8: Create results dataframe
         results = []
@@ -842,6 +888,233 @@ class StandaloneCrewLevelCalculator:
             thresholds.append(threshold)
         
         return thresholds
+    
+    def normalize_features_comprehensive(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Normalize all features to have mean=0 and std=1."""
+        print("Normalizing level scoring features comprehensively (mean=0, std=1)...")
+        
+        # Create a copy to avoid modifying original
+        normalized_df = data.copy()
+        
+        # Apply StandardScaler to each column
+        scaler = StandardScaler()
+        
+        for column in normalized_df.columns:
+            if column in ['user_id', 'crew_level']:  # Skip non-numeric columns
+                continue
+                
+            # Get column values
+            values = normalized_df[column].values.reshape(-1, 1)
+            
+            # Check if there's variation in the column
+            if normalized_df[column].std() > 0:
+                # Normalize to mean=0, std=1
+                normalized_values = scaler.fit_transform(values).flatten()
+                normalized_df[column] = normalized_values
+            else:
+                # If no variation, set all values to 0
+                normalized_df[column] = 0.0
+        
+        numeric_cols = [col for col in normalized_df.columns if col not in ['user_id', 'crew_level']]
+        print(f"Feature normalization completed. Mean values: {normalized_df[numeric_cols].mean().round(3).to_dict()}")
+        print(f"Feature std values: {normalized_df[numeric_cols].std().round(3).to_dict()}")
+        
+        return normalized_df
+    
+    def find_optimal_clusters_elbow(self, features: np.ndarray, max_clusters: int = 10) -> int:
+        """Find optimal number of clusters using elbow method."""
+        print("Finding optimal number of clusters using elbow method...")
+        
+        if len(features) < 2:
+            return 1
+        
+        # Limit max clusters to reasonable range
+        max_clusters = min(max_clusters, len(features) // 2, 10)
+        
+        inertias = []
+        silhouette_scores = []
+        cluster_range = range(2, max_clusters + 1)
+        
+        for k in cluster_range:
+            if k > len(features):
+                break
+                
+            try:
+                kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+                cluster_labels = kmeans.fit_predict(features)
+                
+                inertias.append(kmeans.inertia_)
+                
+                # Calculate silhouette score
+                if len(set(cluster_labels)) > 1:
+                    silhouette_avg = silhouette_score(features, cluster_labels)
+                    silhouette_scores.append(silhouette_avg)
+                else:
+                    silhouette_scores.append(0)
+                    
+            except Exception as e:
+                print(f"Error with k={k}: {e}")
+                break
+        
+        if not inertias:
+            return 2  # Default fallback
+        
+        # Find elbow using rate of change
+        optimal_k = 2
+        if len(inertias) >= 3:
+            # Calculate second derivative to find elbow
+            diffs = np.diff(inertias)
+            second_diffs = np.diff(diffs)
+            
+            if len(second_diffs) > 0:
+                # Find the point where the rate of decrease slows down most
+                elbow_idx = np.argmax(second_diffs) + 2  # +2 because we start from k=2
+                optimal_k = elbow_idx
+        
+        # Validate with silhouette score
+        if silhouette_scores and len(silhouette_scores) > 0:
+            best_silhouette_idx = np.argmax(silhouette_scores)
+            best_silhouette_k = best_silhouette_idx + 2  # +2 because we start from k=2
+            
+            # Use silhouette if it's reasonably close to elbow method
+            if abs(best_silhouette_k - optimal_k) <= 1:
+                optimal_k = best_silhouette_k
+        
+        optimal_k = max(2, min(optimal_k, max_clusters))  # Ensure reasonable range
+        print(f"Optimal number of clusters: {optimal_k}")
+        print(f"Inertias: {inertias}")
+        if silhouette_scores:
+            print(f"Silhouette scores: {[round(s, 3) for s in silhouette_scores]}")
+        
+        return optimal_k
+    
+    def assign_levels_with_knn_clustering(self, composite_scores: Dict[str, float]) -> Dict[str, int]:
+        """Assign crew levels using KNN clustering with improved balance."""
+        print("Assigning crew levels using improved KNN clustering...")
+        
+        if not composite_scores:
+            return {}
+        
+        # Prepare data for clustering
+        user_ids = list(composite_scores.keys())
+        scores = np.array(list(composite_scores.values())).reshape(-1, 1)
+        
+        # Start with 5 clusters (desired levels) and adjust if needed
+        target_clusters = 5
+        min_cluster_size = max(1, len(user_ids) // 10)  # Minimum 10% of users per cluster
+        
+        # Find optimal number of clusters between 3-7
+        optimal_clusters = self.find_optimal_clusters_elbow(scores, max_clusters=7)
+        
+        # Use target clusters if optimal is too extreme
+        if optimal_clusters < 3:
+            optimal_clusters = 3
+        elif optimal_clusters > 6:
+            optimal_clusters = 5
+        
+        # Perform K-means clustering
+        try:
+            # Try multiple random states to get better clustering
+            best_kmeans = None
+            best_silhouette = -1
+            
+            for random_state in [42, 123, 456, 789, 999]:
+                try:
+                    kmeans = KMeans(n_clusters=optimal_clusters, random_state=random_state, n_init=20)
+                    cluster_labels = kmeans.fit_predict(scores)
+                    
+                    # Check cluster balance
+                    unique_labels, counts = np.unique(cluster_labels, return_counts=True)
+                    min_count = np.min(counts)
+                    
+                    if min_count >= min_cluster_size:
+                        if len(unique_labels) > 1:
+                            silhouette_avg = silhouette_score(scores, cluster_labels)
+                            if silhouette_avg > best_silhouette:
+                                best_silhouette = silhouette_avg
+                                best_kmeans = kmeans
+                except:
+                    continue
+            
+            if best_kmeans is None:
+                # Fallback to single attempt
+                best_kmeans = KMeans(n_clusters=optimal_clusters, random_state=42, n_init=20)
+                cluster_labels = best_kmeans.fit_predict(scores)
+            else:
+                cluster_labels = best_kmeans.labels_
+            
+            cluster_centers = best_kmeans.cluster_centers_.flatten()
+            
+            # Sort clusters by their center scores (highest to lowest)
+            sorted_cluster_indices = np.argsort(cluster_centers)[::-1]
+            
+            # Create mapping from cluster label to crew level
+            cluster_to_level = {}
+            for level, cluster_idx in enumerate(sorted_cluster_indices, 1):
+                cluster_to_level[cluster_idx] = level
+            
+            # Assign levels to users
+            user_levels = {}
+            level_counts = {}
+            
+            for i, user_id in enumerate(user_ids):
+                cluster = cluster_labels[i]
+                level = cluster_to_level[cluster]
+                user_levels[user_id] = level
+                level_counts[level] = level_counts.get(level, 0) + 1
+            
+            # Post-process to ensure reasonable distribution if clusters are too unbalanced
+            if len(level_counts) < 3 or max(level_counts.values()) > len(user_ids) * 0.8:
+                print("Clustering too unbalanced, applying hybrid approach...")
+                return self._apply_hybrid_clustering(composite_scores, optimal_clusters)
+            
+            print(f"KNN Clustering completed with {optimal_clusters} clusters")
+            print("Level distribution:")
+            for level in sorted(level_counts.keys()):
+                print(f"  Level {level}: {level_counts[level]} users")
+            
+            print(f"Cluster centers (scores): {sorted(cluster_centers, reverse=True)}")
+            print(f"Silhouette score: {best_silhouette:.3f}")
+            
+            return user_levels
+            
+        except Exception as e:
+            print(f"Error in KNN clustering: {e}")
+            return self._apply_hybrid_clustering(composite_scores, 5)
+    
+    def _apply_hybrid_clustering(self, composite_scores: Dict[str, float], target_clusters: int = 5) -> Dict[str, int]:
+        """Apply hybrid clustering combining KMeans with percentile-based adjustment."""
+        print("Applying hybrid clustering approach...")
+        
+        # Sort users by score
+        sorted_users = sorted(composite_scores.items(), key=lambda x: x[1], reverse=True)
+        total_users = len(sorted_users)
+        
+        # Use quantile-based initial assignment
+        users_per_level = max(1, total_users // target_clusters)
+        remainder = total_users % target_clusters
+        
+        user_levels = {}
+        level_counts = {}
+        
+        current_idx = 0
+        for level in range(1, target_clusters + 1):
+            # Add extra users to lower levels (better performance gets lower level numbers)
+            level_size = users_per_level + (1 if level <= remainder else 0)
+            
+            for i in range(level_size):
+                if current_idx < total_users:
+                    user_id, score = sorted_users[current_idx]
+                    user_levels[user_id] = level
+                    level_counts[level] = level_counts.get(level, 0) + 1
+                    current_idx += 1
+        
+        print("Hybrid clustering completed")
+        print("Level distribution:")
+        for level in sorted(level_counts.keys()):
+            print(f"  Level {level}: {level_counts[level]} users")
+        
+        return user_levels
 
 if __name__ == "__main__":
     calculator = StandaloneCrewLevelCalculator()
