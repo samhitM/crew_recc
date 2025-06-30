@@ -10,7 +10,7 @@ from database.level_db_manager import LevelDatabaseManager
 from graph.level_graph_manager import LevelGraphManager
 from scoring.level_scoring_manager import LevelScoringManager
 from clustering.level_clustering_manager import LevelClusteringManager
-from utils.level_helpers import LevelFileUtils, LevelValidationUtils
+from utils.level_helpers import LevelFileUtils, LevelValidationUtils, LevelAggregationUtils, LevelVisualizationUtils
 
 warnings.filterwarnings("ignore")
 
@@ -27,6 +27,8 @@ class LevelCalculator:
         self.clustering_manager = LevelClusteringManager(target_levels=3)
         self.file_utils = LevelFileUtils()
         self.validation_utils = LevelValidationUtils()
+        self.aggregation_utils = LevelAggregationUtils()
+        self.visualization_utils = LevelVisualizationUtils()
     
     def calculate_crew_levels(self) -> pd.DataFrame:
         """Main method to calculate crew levels."""
@@ -44,24 +46,37 @@ class LevelCalculator:
                 print(f"Error reading existing file: {e}")
                 print("Proceeding with fresh calculation...")
         
+        # Step 0: Get valid users from impression data
+        valid_impression_users = self.scoring_manager.get_valid_impression_users()
+        if not valid_impression_users:
+            print("No valid users found in impression data. Cannot proceed.")
+            return pd.DataFrame()
+        
+        print(f"Will calculate levels for {len(valid_impression_users)} users from impression data")
+        
         # Step 1: Get gaming data and calculate gaming scores
         gaming_data = self.db_manager.fetch_user_games_data()
+        # Filter gaming data to only include users from impression data
+        gaming_data = {user_id: data for user_id, data in gaming_data.items() 
+                      if user_id in valid_impression_users}
         gaming_scores = self.scoring_manager.calculate_gaming_activity_score(gaming_data)
         
         # Step 2: Get impression scores
         impression_scores = self.db_manager.get_impression_scores()
         
-        # Step 3: Calculate community scores
-        community_scores = self.scoring_manager.calculate_community_scores()
+        # Step 3: Calculate community scores and get community membership
+        community_scores, community_membership = self.scoring_manager.calculate_community_scores()
         
         # Step 4: Calculate link prediction scores
         link_prediction_scores = self.graph_manager.calculate_link_prediction_scores()
         
-        # Visualize the community graph
-        self.graph_manager.visualize_community_graph("community_graph_with_interactions.png")
+        # Visualize the community graph with community circles
+        self.graph_manager.visualize_community_graph("community_graph_with_interactions.png", community_membership)
         
-        # Step 5: Calculate bonus factors
+        # Step 5: Calculate bonus factors - only for valid users
         all_users = set(gaming_scores.keys()) | set(impression_scores.keys()) | set(community_scores.keys()) | set(link_prediction_scores.keys())
+        # Filter to only include users from impression data
+        all_users = all_users.intersection(set(valid_impression_users))
         bonus_scores = self.scoring_manager.calculate_bonus_factors(list(all_users))
         
         # Step 6: Calculate composite scores with normalization
@@ -106,7 +121,102 @@ class LevelCalculator:
         # Save results with error handling
         self.file_utils.save_results_with_fallback(df, output_file)
         
+        # Add aggregation and visualization
+        self.perform_aggregation_and_visualization(df)
+        
         return df
+    
+    def perform_aggregation_and_visualization(self, df: pd.DataFrame):
+        """Perform data aggregation and visualization for level scores."""
+        print("\nPerforming level score aggregation and visualization...")
+        
+        # Add timestamp column for aggregation (simulate different times)
+        import numpy as np
+        from datetime import datetime, timedelta
+        
+        # Simulate timestamps over the last 30 days
+        start_date = datetime.now() - timedelta(days=30)
+        timestamps = []
+        for i in range(len(df)):
+            # Simulate random timestamps over the last 30 days
+            random_days = np.random.randint(0, 30)
+            random_hours = np.random.randint(0, 24)
+            timestamp = start_date + timedelta(days=random_days, hours=random_hours)
+            timestamps.append(timestamp)
+        
+        df['timestamp'] = timestamps
+        
+        # Perform aggregations
+        try:
+            # Daily aggregation
+            daily_agg = self.aggregation_utils.aggregate_level_data(
+                df, period='daily', level_col='crew_level'
+            )
+            print(f"Daily aggregation: {len(daily_agg)} records")
+            
+            # Weekly aggregation
+            weekly_agg = self.aggregation_utils.aggregate_level_data(
+                df, period='weekly', level_col='crew_level'
+            )
+            print(f"Weekly aggregation: {len(weekly_agg)} records")
+            
+            # Monthly aggregation
+            monthly_agg = self.aggregation_utils.aggregate_level_data(
+                df, period='monthly', level_col='crew_level'
+            )
+            print(f"Monthly aggregation: {len(monthly_agg)} records")
+            
+        except Exception as e:
+            print(f"Error during aggregation: {e}")
+            daily_agg = weekly_agg = monthly_agg = pd.DataFrame()
+        
+        # Visualizations
+        try:
+            # 1. Level distribution
+            self.visualization_utils.plot_level_distribution(
+                df, level_col='crew_level',
+                title="Crew Level Distribution",
+                save_path="level_distribution.png"
+            )
+            
+            # 2. Composite score distribution
+            self.visualization_utils.plot_level_distribution(
+                df, level_col='composite_score',
+                title="Composite Score Distribution",
+                save_path="composite_score_distribution.png"
+            )
+            
+            # 3. Level trends for top users
+            level_trends = self.aggregation_utils.get_level_trends(
+                df, level_col='crew_level', top_n=10
+            )
+            
+            if level_trends:
+                self.visualization_utils.plot_level_trends(
+                    level_trends,
+                    title="Level Trends for Top 10 Users",
+                    save_path="level_trends.png"
+                )
+            
+            # 4. Aggregation visualizations
+            if not daily_agg.empty:
+                self.visualization_utils.plot_level_aggregations(
+                    daily_agg, period='daily',
+                    title="Daily Level Aggregations",
+                    save_path="daily_level_aggregations.png"
+                )
+            
+            if not weekly_agg.empty:
+                self.visualization_utils.plot_level_aggregations(
+                    weekly_agg, period='weekly',
+                    title="Weekly Level Aggregations", 
+                    save_path="weekly_level_aggregations.png"
+                )
+                
+        except Exception as e:
+            print(f"Error during visualization: {e}")
+        
+        print("Level aggregation and visualization completed!")
 
 
 if __name__ == "__main__":

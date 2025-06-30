@@ -2,6 +2,7 @@
 Graph operations for level scoring.
 """
 import json
+import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
 from typing import Dict, List
@@ -175,37 +176,88 @@ class LevelGraphManager:
         print(f"Calculated link prediction scores for {len(link_scores)} users")
         return link_scores
     
-    def visualize_community_graph(self, filename: str = "community_graph.png"):
-        """Visualize the community graph and save as PNG."""
+    def visualize_community_graph(self, filename: str = "community_graph.png", communities: Dict[str, int] = None):
+        """Visualize the community graph with community circles and save as PNG."""
         if self.graph is None or self.graph.number_of_nodes() == 0:
             print("No graph to visualize")
             return
         
         print(f"Visualizing community graph with {self.graph.number_of_nodes()} nodes and {self.graph.number_of_edges()} edges...")
         
-        plt.figure(figsize=(16, 12))
+        plt.figure(figsize=(20, 16))
         
         # Use spring layout for better visualization
-        pos = nx.spring_layout(self.graph, k=3, iterations=50)
+        pos = nx.spring_layout(self.graph, k=3, iterations=100, seed=42)
         
-        # Draw nodes
+        # If communities are provided, draw community circles
+        if communities:
+            import matplotlib.patches as patches
+            
+            # Group nodes by community
+            community_groups = {}
+            for node, community_id in communities.items():
+                if community_id not in community_groups:
+                    community_groups[community_id] = []
+                community_groups[community_id].append(node)
+            
+            # Define colors for communities
+            colors = plt.cm.Set3(np.linspace(0, 1, len(community_groups)))
+            
+            # Draw faint circles around each community
+            ax = plt.gca()
+            for i, (community_id, nodes) in enumerate(community_groups.items()):
+                if len(nodes) > 1:  # Only draw circles for communities with multiple members
+                    # Get positions of nodes in this community
+                    community_pos = [pos[node] for node in nodes if node in pos]
+                    if community_pos:
+                        # Calculate center and radius of community
+                        x_coords = [p[0] for p in community_pos]
+                        y_coords = [p[1] for p in community_pos]
+                        
+                        center_x = np.mean(x_coords)
+                        center_y = np.mean(y_coords)
+                        
+                        # Calculate radius as max distance from center + padding
+                        max_distance = max([np.sqrt((x - center_x)**2 + (y - center_y)**2) 
+                                          for x, y in community_pos])
+                        radius = max_distance + 0.15
+                        
+                        # Draw faint circle
+                        circle = patches.Circle((center_x, center_y), radius, 
+                                              linewidth=2, edgecolor=colors[i], 
+                                              facecolor=colors[i], alpha=0.15,
+                                              linestyle='--')
+                        ax.add_patch(circle)
+                        
+                        # Add community label
+                        plt.text(center_x, center_y + radius + 0.05, f'Community {community_id}', 
+                               ha='center', va='bottom', fontsize=12, fontweight='bold',
+                               bbox=dict(boxstyle="round,pad=0.3", facecolor=colors[i], alpha=0.7))
+        
+        # Draw nodes with community-based colors
         node_sizes = []
         node_colors = []
         for node in self.graph.nodes():
             # Size based on degree
             degree = self.graph.degree(node)
-            node_sizes.append(max(50, degree * 20))
+            node_sizes.append(max(100, degree * 25))
             
-            # Color based on in-degree (influence)
-            in_degree = self.graph.in_degree(node)
-            node_colors.append(in_degree)
+            # Color based on community membership
+            if communities and node in communities:
+                community_id = communities[node]
+                color_idx = list(set(communities.values())).index(community_id)
+                node_colors.append(color_idx)
+            else:
+                node_colors.append(-1)  # Gray for non-community members
         
         # Draw nodes
         nx.draw_networkx_nodes(self.graph, pos, 
                              node_size=node_sizes, 
                              node_color=node_colors,
-                             cmap=plt.cm.plasma,
-                             alpha=0.7)
+                             cmap=plt.cm.Set3,
+                             alpha=0.8,
+                             edgecolors='black',
+                             linewidths=1)
         
         # Draw edges with weights
         edges = self.graph.edges()
@@ -213,24 +265,26 @@ class LevelGraphManager:
         
         nx.draw_networkx_edges(self.graph, pos,
                              width=[w * 2 for w in weights],
-                             alpha=0.6,
-                             edge_color=weights,
-                             edge_cmap=plt.cm.Blues)
+                             alpha=0.4,
+                             edge_color='gray')
         
-        # Add labels for high-degree nodes only (to avoid clutter)
-        high_degree_nodes = {node: node for node in self.graph.nodes() 
-                           if self.graph.degree(node) > 3}
+        # Add labels for all nodes (smaller font)
         nx.draw_networkx_labels(self.graph, pos, 
-                              labels=high_degree_nodes,
-                              font_size=8)
+                              font_size=8, font_weight='bold')
         
-        plt.title(f"Crew Community Graph\n{self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges", 
-                 fontsize=14)
-        plt.colorbar(plt.cm.ScalarMappable(cmap=plt.cm.plasma), 
-                    label='In-Degree (Influence)', shrink=0.8)
+        # Create title with community info
+        title = f"Crew Community Graph\n{self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges"
+        if communities:
+            num_communities = len(set(communities.values()))
+            title += f", {num_communities} communities detected"
+        
+        plt.title(title, fontsize=16)
+        
+        # Remove axes
+        plt.axis('off')
         
         # Save the plot
         plt.tight_layout()
-        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
         print(f"Community graph visualization saved as {filename}")
         plt.close()  # Close to free memory

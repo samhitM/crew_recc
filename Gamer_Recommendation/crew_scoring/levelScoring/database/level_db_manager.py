@@ -136,6 +136,8 @@ class LevelDatabaseManager:
             impression_file = "../impressionScoring/crew_impressions_revised.csv"
             if os.path.exists(impression_file):
                 df = pd.read_csv(impression_file)
+                # Filter out rows with empty user_ids
+                df = df[df['user_id'].notna() & (df['user_id'] != '')]
                 
                 # Use normalized total impression scores for proper normalization in level scoring
                 impression_scores = {}
@@ -155,6 +157,9 @@ class LevelDatabaseManager:
                 for alt_path in alt_paths:
                     if os.path.exists(alt_path):
                         df = pd.read_csv(alt_path)
+                        # Filter out rows with empty user_ids
+                        df = df[df['user_id'].notna() & (df['user_id'] != '')]
+                        
                         impression_scores = {}
                         for _, row in df.iterrows():
                             impression_scores[row['user_id']] = row['norm_total_impression_score']

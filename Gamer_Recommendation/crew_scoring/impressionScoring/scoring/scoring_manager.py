@@ -155,9 +155,29 @@ class ScoringManager:
             # Extract weights
             feature_weights = {}
             for i, feature_name in enumerate(feature_df.columns):
-                feature_weights[feature_name] = max(0, lr.coef_[i])  # Ensure non-negative weights
+                # Check if this feature has any actual variation in the original data
+                original_values = feature_df.iloc[:, i].values
+                has_variation = np.std(original_values) > 1e-10  # Very small threshold
+                
+                if has_variation:
+                    feature_weights[feature_name] = max(0, lr.coef_[i])  # Ensure non-negative weights
+                else:
+                    feature_weights[feature_name] = 0.0  # Force zero weight for features with no variation
             
             # Normalize weights to sum to 1
+            total_weight = sum(feature_weights.values())
+            if total_weight > 0:
+                feature_weights = {k: v/total_weight for k, v in feature_weights.items()}
+            else:
+                feature_weights = self.default_feature_weights
+            
+            print("Learned feature weights:", feature_weights)
+            return feature_weights
+            
+        except Exception as e:
+            print(f"Error in learning feature weights: {e}")
+            print("Using default feature weights")
+            return self.default_feature_weights
             total_weight = sum(feature_weights.values())
             if total_weight > 0:
                 feature_weights = {k: v/total_weight for k, v in feature_weights.items()}
